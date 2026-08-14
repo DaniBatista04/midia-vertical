@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!--
+    Duas telas verticais lado a lado: é o que o app mostra na área de preview
+    e o que o produto é. Ciano é o accent do gerador de notícias, amarelo o do
+    gerador de clima.
+
+    As medidas são grosseiras de propósito — barras largas e vão de 4px no
+    grid de 32 para os dois blocos continuarem separados a 16px, que é onde
+    o favicon realmente vive.
+  -->
+  <rect width="32" height="32" rx="6" fill="#0b1a2e"/>
+  <rect x="6" y="8" width="8" height="16" rx="2" fill="#5ce3ff"/>
+  <rect x="18" y="6" width="8" height="20" rx="2" fill="#e8ff47"/>
+</svg>
