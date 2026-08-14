@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Documentação e os geradores originais, mantidos só como referência.
+    "docs/**",
   ]),
 ]);
 

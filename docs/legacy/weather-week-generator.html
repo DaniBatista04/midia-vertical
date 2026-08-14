@@ -1,0 +1,1485 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WeatherWeek Generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,700&family=Inter:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #2e2e2e; --panel: #383838; --border: #4a4a4a;
+    --accent: #e8ff47; --red: #ff4747; --text: #ffffff; --muted: #cccccc;
+    --blue: #47c2ff;
+  }
+  body {
+    background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif;
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    grid-template-rows: 52px auto 1fr;
+    height: 100vh; overflow: hidden;
+  }
+  header {
+    grid-column: 1/-1; display: flex; align-items: center; gap: 14px;
+    padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  .logo { font-family: 'Bebas Neue'; font-size: 21px; letter-spacing: 3px; color: var(--accent); }
+  .logo span { color: var(--text); }
+  .tag { font-size: 10px; background: #a855f7; color: #fff; padding: 2px 7px; border-radius: 2px; font-weight: 700; letter-spacing: 1px; }
+  .hstatus { margin-left: auto; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); transition: all .3s; }
+  .dot.ok  { background: #4cff91; box-shadow: 0 0 8px #4cff9166; }
+  .dot.err { background: var(--red); }
+
+  #proxyBanner {
+    grid-column: 1/-1; display: flex; align-items: center; gap: 10px;
+    padding: 7px 20px; font-size: 12px;
+    background: #1a1000; border-bottom: 1px solid #3a2800; color: #ffb347;
+  }
+  #proxyBanner.ok { background: #0a1a0a; border-bottom-color: #1a3a1a; color: #4cff91; }
+  #proxyBanner.hidden { display: none; }
+  #proxyBanner code { background: #ffffff11; padding: 1px 6px; border-radius: 3px; font-family: monospace; font-size: 11px; }
+
+  aside {
+    background: var(--panel); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow-y: auto; grid-row: 3;
+    padding-bottom: 12px;
+  }
+  .slabel { font-size: 10px; font-weight: 700; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; padding: 12px 14px 6px; }
+  .sidebar-section { padding: 8px 14px 12px; display: flex; flex-direction: column; gap: 7px; }
+  .sidebar-section + .sidebar-section { border-top: 1px solid var(--border); }
+
+  input[type=date] {
+    background: #1c1c1c; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font-family: 'DM Sans'; font-size: 12px;
+    padding: 8px 10px; outline: none; transition: border-color .2s; width: 100%;
+    color-scheme: dark;
+  }
+  input[type=date]:focus { border-color: var(--accent); }
+  input[type=date]:disabled { opacity: .4; cursor: not-allowed; }
+  input[type=text], select {
+    background: #1c1c1c; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font-family: 'DM Sans'; font-size: 12px;
+    padding: 8px 10px; outline: none; transition: border-color .2s; width: 100%;
+  }
+  input[type=text]:focus, select:focus { border-color: var(--accent); }
+  select option { background: #1c1c1c; }
+
+  .btn { display: flex; align-items: center; justify-content: center; gap: 6px; border: none; border-radius: 6px; cursor: pointer; font-family: 'DM Sans'; font-weight: 700; font-size: 12px; padding: 8px 13px; transition: all .15s; white-space: nowrap; }
+  .btn-accent { background: var(--accent); color: #000; }
+  .btn-accent:hover { background: #d3eb30; }
+  .btn-blue { background: var(--blue); color: #000; }
+  .btn-blue:hover { background: #2ab0ef; }
+  .btn-ghost { background: #1c1c1c; color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm { font-size: 11px; padding: 6px 11px; }
+  .btn:disabled { opacity: .35; cursor: not-allowed; pointer-events: none; }
+
+  .field-row { display: flex; flex-direction: column; gap: 4px; }
+  .field-label { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+
+  .city-badge {
+    background: #1c1c1c; border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 12px; font-size: 12px; color: var(--accent); display: none;
+  }
+  .city-badge.visible { display: block; }
+
+  .rec-status { display: none; align-items: center; gap: 8px; padding: 8px 12px; background: #1a0000; border: 1px solid #3a0000; border-radius: 6px; font-size: 11px; color: #ff8080; }
+  .rec-status.visible { display: flex; }
+  .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); animation: blink 1s infinite; flex-shrink: 0; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+  .progress-bar { width: 100%; height: 3px; background: var(--border); border-radius: 3px; overflow: hidden; display: none; }
+  .progress-bar.visible { display: block; }
+  .progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width .1s linear; }
+  .progress-label { font-size: 10px; color: var(--muted); text-align: center; min-height: 14px; }
+
+  .ffmpeg-status { display: flex; flex-direction: column; gap: 5px; padding: 8px 10px; background: #1c1c1c; border: 1px solid var(--border); border-radius: 6px; font-size: 11px; color: var(--muted); }
+  .ffmpeg-status.ready   { border-color: #4cff91; color: #4cff91; }
+  .ffmpeg-status.loading { border-color: var(--accent); color: var(--accent); }
+
+  .spinner { width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; display: inline-block; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* MAIN */
+  .main-wrap { grid-row: 3; display: flex; flex-direction: column; overflow: hidden; }
+
+  .canvas-area {
+    flex: 1; overflow: auto; display: flex; flex-direction: row;
+    align-items: flex-start; justify-content: center; gap: 28px; padding: 24px;
+    background: #aaaaaa;
+  }
+  .canvas-col { display: flex; flex-direction: column; align-items: center; gap: 9px; flex-shrink: 0; }
+  .col-header { display: flex; align-items: center; gap: 8px; }
+  .col-title { font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: .8px; text-transform: uppercase; }
+  .format-chip { font-size: 9px; font-weight: 700; letter-spacing: 1px; padding: 2px 7px; border-radius: 3px; text-transform: uppercase; }
+  .chip-a { background: #1a2a4a; color: #6ab0ff; }
+  .chip-b { background: #1a2a1a; color: #6aff91; }
+  .canvas-wrap { box-shadow: 0 18px 55px rgba(0,0,0,.85); position: relative; }
+  canvas { display: block; }
+  .empty-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--muted); pointer-events: none; }
+  .empty-overlay .ei { font-size: 32px; opacity: .2; }
+  .canvas-dim { font-size: 10px; color: var(--muted); }
+
+  /* color swatch */
+  .cswatch { width: 22px; height: 22px; border-radius: 4px; border: 1.5px solid var(--border); cursor: pointer; overflow: hidden; position: relative; flex-shrink: 0; }
+  .cswatch input[type=color] { position: absolute; width: 200%; height: 200%; top: -25%; left: -25%; opacity: 0; cursor: pointer; padding: 0; border: none; }
+  .cswatch-prev { width: 100%; height: 100%; pointer-events: none; }
+
+  .ctrl-row { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+  .clabel { font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: 1.2px; text-transform: uppercase; white-space: nowrap; min-width: 54px; }
+  input[type=range] { -webkit-appearance: none; width: 80px; height: 3px; background: var(--border); border-radius: 3px; outline: none; cursor: pointer; flex-shrink: 0; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; background: var(--accent); border-radius: 50%; }
+  .rval { font-size: 11px; color: var(--muted); min-width: 24px; text-align: right; }
+
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(60px); background: #1e1e1e; border: 1px solid var(--border); color: var(--text); font-size: 13px; padding: 9px 18px; border-radius: 8px; transition: transform .25s; z-index: 999; pointer-events: none; }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+  #toast.ok  { border-color: #4cff91; color: #4cff91; }
+  #toast.err { border-color: var(--red); color: var(--red); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">WEATHER<span>WEEK</span></div>
+  <div class="tag">7 DIAS</div>
+  <div class="hstatus">
+    <div class="dot" id="sDot"></div>
+    <span id="sTxt">Verificando proxy…</span>
+  </div>
+</header>
+
+<div id="proxyBanner">
+  <span id="bIcon">⚠</span>
+  <span id="bMsg">Proxy offline. Rode: <code>node proxy-server.js</code> e recarregue.</span>
+</div>
+
+<!-- SIDEBAR -->
+<aside>
+  <div class="slabel">Configuração</div>
+
+  <div class="sidebar-section">
+    <div class="field-row">
+      <span class="field-label">Texto do cabeçalho</span>
+      <input type="text" id="cityInput" placeholder="Ex: PREVISÃO DO TEMPO" value="PREVISÃO DO TEMPO" oninput="renderBoth()">
+    </div>
+    <div class="field-row">
+      <span class="field-label">WOEID</span>
+      <input type="text" id="woeidInput" placeholder="Ex: 455827" value="455827" inputmode="numeric" pattern="[0-9]*">
+    </div>
+    <div class="field-row">
+      <span class="field-label">Data da imagem</span>
+      <input type="date" id="dateInput" oninput="renderBoth()">
+    </div>
+    <div class="field-row">
+      <span class="field-label">Temperatura</span>
+      <select id="unitSel">
+        <option value="C" selected>Celsius (°C)</option>
+        <option value="F">Fahrenheit (°F)</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-accent" id="fetchBtnWeek" onclick="fetchWeatherWeek()" disabled style="flex:1">📅 Semana</button>
+      <button class="btn btn-blue"   id="fetchBtnDay"  onclick="fetchWeatherDay()"  disabled style="flex:1">🕐 Dia</button>
+    </div>
+    <div class="city-badge" id="cityBadge">—</div>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="slabel" style="padding:0 0 8px">Aparência</div>
+    <div class="ctrl-row">
+      <span class="clabel">Fundo 1</span>
+      <div class="cswatch"><div class="cswatch-prev" id="bg1Prev" style="background:#060b14"></div><input type="color" id="bg1" value="#060b14" oninput="syncC('bg1');renderBoth()"></div>
+      <span class="clabel">Fundo 2</span>
+      <div class="cswatch"><div class="cswatch-prev" id="bg2Prev" style="background:#0d1e35"></div><input type="color" id="bg2" value="#0d1e35" oninput="syncC('bg2');renderBoth()"></div>
+    </div>
+    <div class="ctrl-row">
+      <span class="clabel">Separador</span>
+      <div class="cswatch"><div class="cswatch-prev" id="divColPrev" style="background:#ffffff"></div><input type="color" id="divCol" value="#ffffff" oninput="syncC('divCol');renderBoth()"></div>
+      <span class="clabel">Hoje</span>
+      <div class="cswatch"><div class="cswatch-prev" id="todayColPrev" style="background:#1a3a5a"></div><input type="color" id="todayCol" value="#1a3a5a" oninput="syncC('todayCol');renderBoth()"></div>
+    </div>
+    <div class="ctrl-row">
+      <span class="clabel">Vel. chuva</span>
+      <input type="range" id="rainSpeed" min="0.1" max="1.0" step="0.1" value="0.3" oninput="rng(this,'rainSpeedV')">
+      <span class="rval" id="rainSpeedV">0.3</span><span style="font-size:10px;color:var(--muted)">×</span>
+    </div>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="slabel" style="padding:0 0 6px">Duração</div>
+    <select id="durSel" onchange="recDuration=parseInt(this.value)">
+      <option value="10" selected>10 segundos</option>
+      <option value="15">15 segundos</option>
+      <option value="20">20 segundos</option>
+      <option value="30">30 segundos</option>
+    </select>
+  </div>
+
+  <div class="sidebar-section">
+    <div class="slabel" style="padding:0 0 6px">Exportar MP4</div>
+    <div class="ffmpeg-status" id="encStatus">
+      <div style="display:flex;align-items:center;gap:6px">
+        <div class="spinner" id="encSpinner" style="display:none"></div>
+        <span id="encTxt">Verificando encoder…</span>
+      </div>
+      <button class="btn btn-ghost btn-sm" id="encRetryBtn" onclick="initEncoder()" style="display:none">↻ Tentar novamente</button>
+    </div>
+    <div class="rec-status" id="recStatus"><div class="rec-dot"></div><span id="recTxt">Aguarde…</span></div>
+    <div class="progress-bar" id="recProgress"><div class="progress-fill" id="recFill"></div></div>
+    <div class="progress-label" id="recLabel"></div>
+    <button class="btn btn-accent" id="recBtnBoth" onclick="startRecordingBoth()" disabled>⏺ Exportar os dois</button>
+    <button class="btn btn-blue" id="recBtn"  onclick="startRecording(0)" disabled>⏺ Exportar 32" (1080×1920)</button>
+    <button class="btn btn-blue" id="recBtn2" onclick="startRecording(1)" disabled>⏺ Exportar 25" (1080×2560)</button>
+    <button class="btn btn-ghost btn-sm" id="stopBtn" onclick="stopRecording()" disabled>⏹ Cancelar</button>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<div class="main-wrap">
+  <div class="canvas-area">
+
+    <div class="canvas-col">
+      <div class="col-header">
+        <span class="format-chip chip-a">1080 × 1920</span>
+        <span class="col-title">Tela 32"</span>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="cv1"></canvas>
+        <div class="empty-overlay" id="emp1"><div class="ei">📅</div><p style="font-size:11px">Busque a previsão para preview</p></div>
+      </div>
+      <div class="canvas-dim">1080 × 1920 px</div>
+    </div>
+
+    <div class="canvas-col">
+      <div class="col-header">
+        <span class="format-chip chip-b">1080 × 2560</span>
+        <span class="col-title">Tela 25"</span>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="cv2"></canvas>
+        <div class="empty-overlay" id="emp2"><div class="ei">📅</div><p style="font-size:11px">Busque a previsão para preview</p></div>
+      </div>
+      <div class="canvas-dim">1080 × 2560 px</div>
+    </div>
+
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────
+const PX       = 'http://127.0.0.1:3131';
+const API_KEY  = '<REDIGIDA — ver HG_BRASIL_KEY>'; // chave removida ao publicar o repositório
+const PREVIEW_SCALE = 324 / 1080; // preview -10% da escala anterior
+
+const FMTS = [
+  { w: 1080, h: 1920, cvId: 'cv1', label: '32"' },
+  { w: 1080, h: 2560, cvId: 'cv2', label: '25"' },
+];
+
+// ── State ────────────────────────────────────────────────────
+let weekData       = null;
+let dayData        = null;
+let currentMode    = 'week';
+let proxyOk        = false;
+let animFrame      = null;
+let tStart         = null;
+let encoderReady   = false;
+let encoderCodec   = null; // { codec, muxerCodec, label }
+let mediaRecorder  = null;
+let cancelRequested = false;
+let recDuration    = 10;
+
+// ── Condition map ────────────────────────────────────────────
+const COND_MAP = {
+  storm:               { emoji: '⛈',  color: '#8080ff', label: 'Tempestade' },
+  storm_night:         { emoji: '⛈',  color: '#6060cc', label: 'Tempestade' },
+  snow:                { emoji: '❄',  color: '#aaddff', label: 'Neve' },
+  hail:                { emoji: '🌨',  color: '#99ccee', label: 'Granizo' },
+  rain:                { emoji: '🌧',  color: '#6ab0ff', label: 'Chuva' },
+  rain_night:          { emoji: '🌧',  color: '#4a88cc', label: 'Chuva' },
+  fog:                 { emoji: '🌫',  color: '#aabbcc', label: 'Névoa' },
+  fog_night:           { emoji: '🌫',  color: '#7788aa', label: 'Névoa' },
+  drizzle:             { emoji: '🌦',  color: '#88bbdd', label: 'Garoa' },
+  drizzle_night:       { emoji: '🌧',  color: '#5588aa', label: 'Garoa' },
+  cloud:               { emoji: '☁',  color: '#99aabb', label: 'Nublado' },
+  cloud_night:         { emoji: '☁',  color: '#6677aa', label: 'Nublado' },
+  partly_cloudy:       { emoji: '⛅',  color: '#ffcc66', label: 'Parcial' },
+  partly_cloudy_night: { emoji: '🌙',  color: '#99aaff', label: 'Parcial' },
+  clear_night:         { emoji: '🌙',  color: '#99aaff', label: 'Noite' },
+  clear:               { emoji: '☀',  color: '#ffe566', label: 'Sol' },
+};
+
+function mapCond(slug, isDay = true) {
+  const s = (slug || '').toLowerCase();
+  if (s.includes('storm') || s.includes('thunder')) return isDay ? 'storm'   : 'storm_night';
+  if (s.includes('snow'))    return 'snow';
+  if (s.includes('hail'))    return 'hail';
+  if (s.includes('rain') || s.includes('shower'))   return isDay ? 'rain'    : 'rain_night';
+  if (s.includes('fog') || s.includes('mist'))      return isDay ? 'fog'     : 'fog_night';
+  if (s.includes('drizzle'))                        return isDay ? 'drizzle' : 'drizzle_night';
+  if (s.includes('overcast') || s === 'cloudy')     return isDay ? 'cloud'   : 'cloud_night';
+  if (s.includes('cloud') || s.includes('partly'))  return isDay ? 'partly_cloudy' : 'partly_cloudy_night';
+  if (!isDay) return 'clear_night';
+  return 'clear';
+}
+
+// ── Fetch day (hourly) ───────────────────────────────────────
+async function fetchWeatherDay() {
+  const woeid = document.getElementById('woeidInput').value.trim();
+  if (!woeid) return toast('Informe o WOEID.', 'err');
+
+  const btn = document.getElementById('fetchBtnDay');
+  btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Buscando…';
+  setSt('Buscando previsão do dia…');
+
+  // Preenche cabeçalho e muda cor de fundo para modo Dia
+  document.getElementById('cityInput').value = 'PREVISÃO DO DIA';
+  document.getElementById('bg1').value = '#103a8e';
+  document.getElementById('bg1Prev').style.background = '#103a8e';
+  // Dia: campo habilitado, default = hoje
+  const _today = new Date();
+  const _tmrw  = new Date(); _tmrw.setDate(_tmrw.getDate()+1);
+  document.getElementById('dateInput').value = _today.toISOString().slice(0,10);
+  document.getElementById('dateInput').disabled = false;
+  document.getElementById('dateInput').min = _today.toISOString().slice(0,10);
+  document.getElementById('dateInput').max = _tmrw.toISOString().slice(0,10);
+
+  const apiUrl = `https://api.hgbrasil.com/weather?hourly=true&key=${API_KEY}&woeid=${encodeURIComponent(woeid)}`;
+
+  try {
+    let data;
+    if (proxyOk) {
+      const r = await fetch(`${PX}/feed?url=${encodeURIComponent(apiUrl)}`, { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) throw new Error(`Proxy HTTP ${r.status}`);
+      data = JSON.parse(await r.text());
+    } else {
+      const r = await fetch(apiUrl, { signal: AbortSignal.timeout(15000) });
+      data = await r.json();
+    }
+
+    if (data.error === true) throw new Error(data.message || 'Erro na API');
+    if (!data.results)       throw new Error('Sem campo results na resposta');
+
+    const res  = data.results;
+    const unit = document.getElementById('unitSel').value;
+    const toUnit = c => (c == null) ? '—' : (unit === 'F' ? Math.round(c*9/5+32) : c);
+
+    console.log('[WeatherDay] hourly_forecast sample:', (res.hourly_forecast||[]).slice(0,3));
+    console.log('[WeatherDay] results current:', res.temp, res.condition_slug, res.wind_speedy);
+
+    const hourly = res.hourly_forecast || [];
+
+    console.log('[WeatherDay] hourly sample:', hourly.slice(0,3));
+
+    // Formato confirmado: date="2026-05-28", time="09:00"
+    // Converte cada entrada para slot normalizado
+    const allSlots = hourly.map(f => {
+      const fh  = parseInt((f.time || '00:00').split(':')[0]); // "09:00" → 9
+      const isD = fh >= 6 && fh < 18;
+      return {
+        hourNum:   fh,
+        hourLabel: f.time ? f.time.slice(0,5) : `${String(fh).padStart(2,'0')}:00`,
+        date:      f.date || '',   // "2026-05-28"
+        temp:      toUnit(f.temp ?? null),
+        rain_prob: f.rain_probability ?? f.rain ?? '—',
+        wind:      f.wind_speedy || res.wind_speedy || '—',
+        condKey:   mapCond(f.condition || '', isD),
+      };
+    });
+
+    // Slot atual do results (cobre hora corrente se ainda não no forecast)
+    const nowH    = new Date().getHours();
+    const nowDate = new Date().toISOString().slice(0, 10); // "2026-05-28"
+    const currentSlot = {
+      hourNum:   nowH,
+      hourLabel: `${String(nowH).padStart(2,'0')}:00`,
+      date:      nowDate,
+      temp:      toUnit(res.temp ?? null),
+      rain_prob: res.rain_probability ?? res.rain ?? '—',
+      wind:      res.wind_speedy || '—',
+      condKey:   mapCond(res.condition_slug || '', nowH >= 6 && nowH < 18),
+    };
+
+    // TARGET_HOURS de 2 em 2, 08–22
+    const TARGET_HOURS = [8,10,12,14,16,18,20,22];
+
+    // buildSlots: filtra por data YYYY-MM-DD e busca hora exata ou mais próxima
+    const buildSlots = (dateStr) => {
+      // dateStr vem do campo como "YYYY-MM-DD" (ex: "2026-05-28")
+      const daySlots = dateStr
+        ? allSlots.filter(s => s.date === dateStr)
+        : allSlots;
+
+      return TARGET_HOURS.map(h => {
+        const isD = h >= 6 && h < 18;
+
+        // 1. Hora exata no forecast
+        let match = daySlots.find(s => s.hourNum === h) || null;
+
+        // 2. Hora corrente não está no forecast → usa results
+        if (!match && h === nowH && (!dateStr || dateStr === nowDate)) {
+          match = currentSlot;
+        }
+
+        // 3. Hora mais próxima disponível no mesmo dia (dentro de 2h)
+        if (!match) {
+          match = daySlots
+            .filter(s => Math.abs(s.hourNum - h) <= 2)
+            .sort((a,b) => Math.abs(a.hourNum-h) - Math.abs(b.hourNum-h))[0] || null;
+        }
+
+        return {
+          hour:      match ? match.hourLabel : `${String(h).padStart(2,'0')}:00`,
+          temp:      match ? match.temp      : '—',
+          rain_prob: match ? match.rain_prob : '—',
+          wind:      match ? match.wind      : '—',
+          condKey:   match ? match.condKey   : (isD ? 'clear' : 'clear_night'),
+          isNow:     false,
+        };
+      });
+    };
+
+    dayData = {
+      city:     document.getElementById('cityInput').value.trim() || res.city || 'Previsão do Dia',
+      unit,
+      allSlots, // todos os slots brutos para re-filtragem
+      slots:    buildSlots(null), // inicial sem filtro de data
+      buildSlots,
+    };
+
+    document.getElementById('cityBadge').textContent = `📍 ${res.city}`;
+    document.getElementById('cityBadge').classList.add('visible');
+    document.getElementById('emp1').style.display = 'none';
+    document.getElementById('emp2').style.display = 'none';
+
+    currentMode = 'day';
+    tStart = null;
+    renderBoth();
+
+    setSt('Previsão do dia carregada', true);
+    toast(`✓ ${res.city} — ${dayData.slots.length} horários`, 'ok');
+    if (encoderReady) enableRecButtons();
+
+  } catch(e) {
+    toast('Erro: ' + e.message, 'err');
+    setSt('Erro', false, true);
+    console.error(e);
+  } finally {
+    btn.disabled = false; btn.innerHTML = '🕐 Dia';
+  }
+}
+
+// ── Proxy ────────────────────────────────────────────────────
+async function checkProxy() {
+  const banner = document.getElementById('proxyBanner');
+  try {
+    const r = await fetch(`${PX}/health`, { signal: AbortSignal.timeout(3000) });
+    if ((await r.json()).ok) {
+      proxyOk = true;
+      banner.className = 'ok';
+      document.getElementById('bIcon').textContent = '✓';
+      document.getElementById('bMsg').textContent = 'Proxy local ativo na porta 3131.';
+      document.getElementById('fetchBtnWeek').disabled = false;
+      document.getElementById('fetchBtnDay').disabled = false;
+      setSt('Proxy ativo', true);
+      setTimeout(() => banner.classList.add('hidden'), 3000);
+      return;
+    }
+  } catch {}
+  proxyOk = false;
+  document.getElementById('fetchBtnWeek').disabled = false;
+  document.getElementById('fetchBtnDay').disabled = false;
+  setSt('Sem proxy', false, false);
+}
+
+// ── Fetch 7-day forecast ─────────────────────────────────────
+// Fatia o forecast a partir da data selecionada no campo
+function sliceForecastFromDate(raw) {
+  const sel   = getSelectedDate();
+  const selDD = String(sel.getDate()).padStart(2,'0');
+  const selMM = String(sel.getMonth()+1).padStart(2,'0');
+  const selStr = `${selDD}/${selMM}`; // DD/MM — compara apenas dia e mês
+
+  // Acha o índice do dia selecionado no forecast
+  let startIdx = raw.findIndex(fc => fc.date.startsWith(selStr));
+
+  // Se não encontrar, começa do dia seguinte ao hoje (índice 1)
+  if (startIdx < 0) startIdx = 1;
+
+  return raw.slice(startIdx, startIdx + 7).map((fc, i) => ({
+    ...fc,
+    isToday: i === 0, // destaca o primeiro da lista (= dia selecionado)
+  }));
+}
+
+function getSelectedDate() {
+  // Retorna Date a partir do campo, fallback para amanhã
+  const v = document.getElementById('dateInput').value; // "YYYY-MM-DD"
+  if (v) {
+    const [y,m,d] = v.split('-').map(Number);
+    return new Date(y, m-1, d);
+  }
+  const t = new Date(); t.setDate(t.getDate() + 1); return t;
+}
+
+async function fetchWeatherWeek() {
+  const woeid = document.getElementById('woeidInput').value.trim();
+  if (!woeid) return toast('Informe o WOEID.', 'err');
+
+  const btn = document.getElementById('fetchBtnWeek');
+  btn.disabled = true; btn.innerHTML = '<div class="spinner"></div> Buscando…';
+  setSt('Buscando previsão da semana…');
+
+  // Preenche cabeçalho e restaura cor de fundo padrão
+  document.getElementById('cityInput').value = 'PREVISÃO DA SEMANA';
+  document.getElementById('bg1').value = '#060b14';
+  document.getElementById('bg1Prev').style.background = '#060b14';
+  document.getElementById('dateInput').disabled = false;
+  document.getElementById('dateInput').min = '';
+  document.getElementById('dateInput').max = '';
+  if (!document.getElementById('dateInput').value) {
+    const t = new Date(); t.setDate(t.getDate()+1);
+    document.getElementById('dateInput').value = t.toISOString().slice(0,10);
+  }
+
+  const apiUrl = `https://api.hgbrasil.com/weather?key=${API_KEY}&woeid=${encodeURIComponent(woeid)}`;
+
+  try {
+    let data;
+    if (proxyOk) {
+      const r = await fetch(`${PX}/feed?url=${encodeURIComponent(apiUrl)}`, { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) throw new Error(`Proxy HTTP ${r.status}`);
+      data = JSON.parse(await r.text());
+    } else {
+      const r = await fetch(apiUrl, { signal: AbortSignal.timeout(15000) });
+      data = await r.json();
+    }
+
+    if (data.error === true) throw new Error(data.message || 'Erro na API');
+    if (!data.results)       throw new Error('Sem campo results na resposta');
+
+    const res  = data.results;
+    const unit = document.getElementById('unitSel').value;
+
+    const toUnit = c => {
+      if (c === null || c === undefined) return '—';
+      return unit === 'F' ? Math.round(c * 9/5 + 32) : c;
+    };
+
+    const DIAS_PT = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+
+    console.log('[WeatherWeek] API response:', res);
+    console.log('[WeatherWeek] forecast[0]:', res.forecast?.[0]);
+
+    // Converte todos os dias do forecast (sem pular nenhum)
+    const allForecast = (res.forecast || []).map((fc, i) => {
+      const wd = typeof fc.weekday === 'number'
+        ? DIAS_PT[fc.weekday]
+        : String(fc.weekday || '').replace('.','').slice(0,3);
+      const rainRaw = fc.rain_probability ?? fc.rain_chance ?? fc.rain ?? null;
+      return {
+        weekday:   wd || ('D'+(i+1)),
+        date:      fc.date || '',       // formato DD/MM/YYYY
+        max:       toUnit(fc.max),
+        min:       toUnit(fc.min),
+        humidity:  fc.humidity != null ? fc.humidity : '—',
+        rain_prob: rainRaw != null ? rainRaw : '—',
+        wind:      fc.wind_speedy || res.wind_speedy || '—',
+        condition: fc.condition || '',
+        condKey:   mapCond(fc.condition, true), // semana sempre usa ícones diurnos
+      };
+    });
+
+    weekData = {
+      city:        document.getElementById('cityInput').value.trim() || res.city || 'Cidade',
+      unit,
+      rawForecast: allForecast, // todos os dias — slicedForecast é calculado no draw
+    };
+
+    // Calcula o slice inicial baseado na data selecionada
+    weekData.forecast = sliceForecastFromDate(allForecast);
+
+    document.getElementById('cityBadge').textContent = `📍 ${res.city}`;
+    document.getElementById('cityBadge').classList.add('visible');
+
+    currentMode = 'week';
+    tStart = null;
+    renderBoth();
+
+    document.getElementById('emp1').style.display = 'none';
+    document.getElementById('emp2').style.display = 'none';
+    setSt('Previsão carregada', true);
+    toast(`✓ ${res.city} — ${weekData.forecast.length} dias`, 'ok');
+    if (encoderReady) enableRecButtons();
+
+  } catch(e) {
+    toast('Erro: ' + e.message, 'err');
+    setSt('Erro', false, true);
+    console.error(e);
+  } finally {
+    btn.disabled = false; btn.innerHTML = '📅 Semana';
+  }
+}
+
+// ── Particles (background ambience) ─────────────────────────
+
+// ── Small weather icon (canvas) ──────────────────────────────
+function drawIcon(ctx, ck, cx, cy, size, t, speed) {
+  const angle = t * 0.001 * speed;
+  ctx.save(); ctx.translate(cx, cy);
+
+  switch(ck) {
+    case 'clear': {
+      const pulse = 1 + Math.sin(angle * 2) * 0.05;
+      ctx.save(); ctx.scale(pulse, pulse);
+      const sg = ctx.createRadialGradient(0,0,size*.05,0,0,size*.45);
+      sg.addColorStop(0,'#ffe566'); sg.addColorStop(.6,'#ffb300'); sg.addColorStop(1,'rgba(255,180,0,0)');
+      ctx.fillStyle = sg; ctx.beginPath(); ctx.arc(0,0,size*.45,0,Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#ffcc44'; ctx.lineWidth = size*.06;
+      for (let i=0;i<8;i++) {
+        ctx.save(); ctx.rotate(angle + i*Math.PI/4);
+        ctx.beginPath(); ctx.moveTo(size*.34,0); ctx.lineTo(size*.48,0); ctx.stroke();
+        ctx.restore();
+      }
+      ctx.restore(); break;
+    }
+    case 'clear_night': {
+      ctx.fillStyle = '#c8dcff';
+      ctx.shadowColor='#88aaff'; ctx.shadowBlur=size*.4;
+      ctx.beginPath(); ctx.arc(0,0,size*.32,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#060b14'; ctx.shadowBlur=0;
+      ctx.beginPath(); ctx.arc(size*.13,-size*.08,size*.24,0,Math.PI*2); ctx.fill();
+      break;
+    }
+    case 'rain': case 'drizzle': {
+      drawCloudCtx(ctx,0,-size*.1,size*.38,'#6080a0');
+      ctx.strokeStyle='#6ab0ff'; ctx.lineWidth=size*.05; ctx.globalAlpha=.8;
+      const rs = parseFloat(document.getElementById('rainSpeed')?.value || 1);
+      const n = ck==='drizzle'?3:5;
+      for(let i=0;i<n;i++){
+        const dx=(i/(n-1)-.5)*size*.5;
+        const dy=size*.2+((t*.004*rs+i*.25)%1)*size*.25;
+        ctx.beginPath(); ctx.moveTo(dx-size*.03,dy); ctx.lineTo(dx,dy+size*.15); ctx.stroke();
+      }
+      ctx.globalAlpha=1; break;
+    }
+    case 'storm': {
+      drawCloudCtx(ctx,0,-size*.1,size*.4,'#405060');
+      ctx.fillStyle='#ffe566'; ctx.shadowColor='#ffee00'; ctx.shadowBlur=size*.25;
+      ctx.beginPath();
+      ctx.moveTo(size*.05,size*.08); ctx.lineTo(-size*.05,size*.26);
+      ctx.lineTo(size*.02,size*.26); ctx.lineTo(-size*.05,size*.44);
+      ctx.lineTo(size*.08,size*.22); ctx.lineTo(size*.01,size*.22); ctx.closePath(); ctx.fill();
+      ctx.shadowBlur=0; break;
+    }
+    case 'snow': {
+      drawCloudCtx(ctx,0,-size*.1,size*.38,'#90b0c8');
+      ctx.fillStyle='#ddeeff';
+      const rs2 = parseFloat(document.getElementById('rainSpeed')?.value || 1);
+      for(let i=0;i<4;i++){const dx=(i/3-.5)*size*.45; const dy=size*.2+((t*.002*rs2+i*.28)%1)*size*.22; ctx.beginPath(); ctx.arc(dx,dy,size*.05,0,Math.PI*2); ctx.fill();} break;
+    }
+    case 'partly_cloudy': {
+      const sg2=ctx.createRadialGradient(-size*.08,-size*.15,0,-size*.08,-size*.15,size*.3);
+      sg2.addColorStop(0,'#ffe566'); sg2.addColorStop(1,'rgba(255,200,0,0)');
+      ctx.fillStyle=sg2; ctx.beginPath(); ctx.arc(-size*.08,-size*.15,size*.3,0,Math.PI*2); ctx.fill();
+      drawCloudCtx(ctx,size*.08,size*.05,size*.36,'#b0c8e0'); break;
+    }
+    // ── Noturno: nuvem escura com lua atrás ──────────────────
+    case 'cloud_night': {
+      // Lua parcialmente atrás das nuvens
+      ctx.fillStyle = '#c8dcff';
+      ctx.shadowColor = '#8899ff'; ctx.shadowBlur = size * .3;
+      ctx.beginPath(); ctx.arc(-size*.18, -size*.18, size*.26, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#0a0f1e'; ctx.shadowBlur = 0;
+      ctx.beginPath(); ctx.arc(-size*.06, -size*.24, size*.20, 0, Math.PI*2); ctx.fill();
+      // Nuvem escura na frente
+      drawCloudCtx(ctx, size*.06, size*.05, size*.44, '#4a5570');
+      break;
+    }
+    case 'partly_cloudy_night': {
+      // Lua visível + nuvem pequena
+      ctx.fillStyle = '#c8dcff';
+      ctx.shadowColor = '#8899ff'; ctx.shadowBlur = size * .35;
+      ctx.beginPath(); ctx.arc(-size*.16, -size*.16, size*.28, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#0a0f1e'; ctx.shadowBlur = 0;
+      ctx.beginPath(); ctx.arc(-size*.04, -size*.22, size*.21, 0, Math.PI*2); ctx.fill();
+      // Nuvem menor, mais translúcida
+      drawCloudCtx(ctx, size*.18, size*.08, size*.36, '#6070a0');
+      break;
+    }
+    case 'rain_night': {
+      drawCloudCtx(ctx, 0, -size*.1, size*.38, '#354560');
+      ctx.strokeStyle = '#6ab0ff'; ctx.lineWidth = size*.05; ctx.globalAlpha = .75;
+      const rsrn = parseFloat(document.getElementById('rainSpeed')?.value || 1);
+      for(let i=0;i<5;i++){
+        const dx=(i/4-.5)*size*.5;
+        const dy=size*.2+((t*.004*rsrn+i*.25)%1)*size*.25;
+        ctx.beginPath(); ctx.moveTo(dx-size*.03,dy); ctx.lineTo(dx,dy+size*.15); ctx.stroke();
+      }
+      ctx.globalAlpha=1; break;
+    }
+    case 'drizzle_night': {
+      drawCloudCtx(ctx, 0, -size*.1, size*.38, '#354560');
+      ctx.strokeStyle = '#88aacc'; ctx.lineWidth = size*.04; ctx.globalAlpha = .65;
+      const rsdn = parseFloat(document.getElementById('rainSpeed')?.value || 1);
+      for(let i=0;i<3;i++){
+        const dx=(i/2-.5)*size*.45;
+        const dy=size*.2+((t*.004*rsdn+i*.3)%1)*size*.22;
+        ctx.beginPath(); ctx.moveTo(dx-size*.02,dy); ctx.lineTo(dx,dy+size*.12); ctx.stroke();
+      }
+      ctx.globalAlpha=1; break;
+    }
+    case 'storm_night': {
+      drawCloudCtx(ctx, 0, -size*.1, size*.4, '#252e3a');
+      ctx.fillStyle = '#ccccff'; ctx.shadowColor = '#aaaaff'; ctx.shadowBlur = size*.2;
+      ctx.beginPath();
+      ctx.moveTo(size*.05,size*.08); ctx.lineTo(-size*.05,size*.26);
+      ctx.lineTo(size*.02,size*.26); ctx.lineTo(-size*.05,size*.44);
+      ctx.lineTo(size*.08,size*.22); ctx.lineTo(size*.01,size*.22); ctx.closePath(); ctx.fill();
+      ctx.shadowBlur=0; break;
+    }
+    case 'fog_night': {
+      // Lua tênue + névoa
+      ctx.fillStyle = '#9aabcc'; ctx.globalAlpha = .4;
+      ctx.beginPath(); ctx.arc(0, -size*.12, size*.28, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#0a0f1e';
+      ctx.beginPath(); ctx.arc(size*.12, -size*.18, size*.21, 0, Math.PI*2); ctx.fill();
+      ctx.globalAlpha = 1;
+      // Faixas de névoa
+      ctx.strokeStyle = '#6677aa'; ctx.lineWidth = size*.08; ctx.lineCap = 'round';
+      for(let i=0;i<3;i++){
+        const fy = (i - 1) * size*.22;
+        const fx = Math.sin(t*.0008 + i) * size*.06;
+        ctx.globalAlpha = .25 + i*.1;
+        ctx.beginPath(); ctx.moveTo(-size*.38+fx, fy); ctx.lineTo(size*.38+fx, fy); ctx.stroke();
+      }
+      ctx.globalAlpha=1; ctx.lineCap='butt'; break;
+    }
+    default: drawCloudCtx(ctx,0,0,size*.44,'#8090a8');
+  }
+  ctx.restore();
+}
+
+function drawCloudCtx(ctx,cx,cy,r,color){
+  ctx.fillStyle=color;
+  ctx.beginPath();
+  ctx.arc(cx,cy,r*.5,0,Math.PI*2);
+  ctx.arc(cx+r*.42,cy+r*.18,r*.36,0,Math.PI*2);
+  ctx.arc(cx-r*.36,cy+r*.12,r*.3,0,Math.PI*2);
+  ctx.arc(cx+r*.08,cy+r*.34,r*.27,0,Math.PI*2);
+  ctx.fill();
+}
+
+// ── Main draw — dispatcher ───────────────────────────────────
+function drawFrame(canvas, fmt, t) {
+  if (currentMode === 'day') { drawFrameDay(canvas, fmt, t); return; }
+  drawFrameWeek(canvas, fmt, t);
+}
+
+// ── Week draw — VERTICAL layout ──────────────────────────────
+function drawFrameWeek(canvas, fmt, t) {
+  if (!weekData || !weekData.rawForecast) return;
+  // Re-slice baseado na data selecionada (atualiza em tempo real ao mudar o campo)
+  weekData.forecast = sliceForecastFromDate(weekData.rawForecast);
+  if (!weekData.forecast.length) return;
+
+  const W   = canvas.width;
+  const H   = canvas.height;
+  const sc  = W / 1080;
+  const ctx = canvas.getContext('2d');
+  const sp  = 1.0; // velocidade dos ícones fixa
+
+  // ── Background ──────────────────────────────────────────
+  const bg1  = document.getElementById('bg1').value;
+  const bg2  = document.getElementById('bg2').value;
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, bg1); grad.addColorStop(1, bg2);
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+
+  const glow = ctx.createRadialGradient(W*.5, H*.3, 0, W*.5, H*.3, W*.9);
+  glow.addColorStop(0,'rgba(80,130,220,0.07)'); glow.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+
+  const days       = weekData.forecast;
+  const N          = days.length;
+  const divColor   = document.getElementById('divCol').value;
+  const todayColor = document.getElementById('todayCol').value;
+
+  // ── Header ──────────────────────────────────────────────
+  const headerH = H * 0.10;
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+
+  // City
+  ctx.font      = `700 ${70*sc}px 'DM Sans', sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillText(weekData.city.toUpperCase(), W*.5, headerH * .38);
+
+  // Date subtitle
+  const selectedDate = getSelectedDate();
+  ctx.font      = `400 ${26*sc}px 'Inter', sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.32)';
+  ctx.fillText(
+    selectedDate.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'}).toUpperCase(),
+    W*.5, headerH * .75
+  );
+
+  // ── Rows ─────────────────────────────────────────────────
+  const footerH = H * 0.07;                      // barra inferior
+  const rowsH   = H - headerH - footerH - 8*sc;  // área das linhas
+  const rowH    = rowsH / N;
+
+  // Column X positions — margens laterais de 60px (escalonadas por sc)
+  // Área útil: de 60*sc até W-60*sc
+  const M   = 60 * sc; // margem lateral
+  const USE = W - M * 2; // largura útil
+
+  // Header divider
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+  ctx.lineWidth   = 1 * sc;
+  ctx.beginPath(); ctx.moveTo(M, headerH); ctx.lineTo(W-M, headerH); ctx.stroke();
+  const COL = {
+    day:   M + USE * 0.00,  // weekday + date — left-aligned
+    icon:  M + USE * 0.22,  // weather icon center (avançado para preencher espaço da condição)
+    temp:  M + USE * 0.45,  // max / min
+    hum:   M + USE * 0.615, // humidity
+    rain:  M + USE * 0.775, // rain probability
+    wind:  M + USE * 0.930, // wind
+  };
+
+  // Column header labels (drawn once, above rows)
+  const colLabelY = headerH + rowH * .18;
+  ctx.font      = `600 ${20*sc}px 'Inter', sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const colLabels = [
+    [COL.temp,  'MÁX / MÍN'],
+    [COL.hum,   'UMIDADE'],
+    [COL.rain,  'CHUVA'],
+    [COL.wind,  'VENTO'],
+  ];
+  for (const [x, lbl] of colLabels) {
+    ctx.fillText(lbl, x, colLabelY);
+  }
+
+  for (let i = 0; i < N; i++) {
+    const d   = days[i];
+    const ck  = d.condKey;
+    const cm  = COND_MAP[ck] || COND_MAP.clear;
+    const rowY = headerH + i * rowH;
+    const midY = rowY + rowH * .5;
+
+    // ── Today highlight ──────────────────────────────────
+    if (d.isToday) {
+      ctx.fillStyle = todayColor + '40';
+      roundRect(ctx, M * .4, rowY + 4*sc, W - M*.8, rowH - 8*sc, 12*sc);
+      ctx.fill();
+      ctx.fillStyle = todayColor;
+      roundRect(ctx, M * .4, rowY + rowH*.2, 4*sc, rowH*.6, 2*sc);
+      ctx.fill();
+    }
+
+    // ── Row divider ───────────────────────────────────────
+    if (i > 0) {
+      ctx.strokeStyle = divColor + '55';
+      ctx.lineWidth   = 1 * sc;
+      ctx.beginPath(); ctx.moveTo(M * .4, rowY); ctx.lineTo(W - M*.4, rowY); ctx.stroke();
+    }
+
+    ctx.textBaseline = 'middle';
+
+    // ── Day + date ────────────────────────────────────────
+    ctx.textAlign = 'left';
+    ctx.font      = `700 ${34*sc}px 'Inter', sans-serif`;
+    ctx.fillStyle = d.isToday ? '#e8ff47' : 'rgba(255,255,255,0.90)';
+    ctx.fillText(d.weekday.toUpperCase(), COL.day, midY - 12*sc);
+
+    ctx.font      = `400 ${22*sc}px 'Inter', sans-serif`;
+    ctx.fillStyle = 'rgba(255,255,255,0.32)';
+    ctx.fillText(d.date, COL.day, midY + 16*sc);
+
+    // ── Icon ──────────────────────────────────────────────
+    const iconSize = rowH * .52;
+    drawIcon(ctx, ck, COL.icon, midY, iconSize, t, sp);
+
+    // ── Max / Min ─────────────────────────────────────────
+    // MAX
+    ctx.font      = `700 ${46*sc}px 'Inter', sans-serif`;
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${d.max}°`, COL.temp - 10*sc, midY - 2*sc);
+
+    // separator
+    ctx.font      = `300 ${30*sc}px 'Inter', sans-serif`;
+    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+    ctx.textAlign = 'center';
+    ctx.fillText('/', COL.temp + 14*sc, midY + 2*sc);
+
+    // MIN
+    ctx.font      = `300 ${34*sc}px 'Inter', sans-serif`;
+    ctx.fillStyle = 'rgba(255,255,255,0.40)';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${d.min}°`, COL.temp + 28*sc, midY + 2*sc);
+
+    // ── Humidity ──────────────────────────────────────────
+    drawRowStat(ctx, COL.hum, midY, '💧', d.humidity !== '—' ? `${d.humidity}%` : '—', sc);
+
+    // ── Rain probability ──────────────────────────────────
+    drawRowStat(ctx, COL.rain, midY, '🌧', d.rain_prob !== '—' ? `${d.rain_prob}%` : '—', sc);
+
+    // ── Wind ─────────────────────────────────────────────
+    drawRowStat(ctx, COL.wind, midY, '💨', `${d.wind}`, sc);
+  }
+
+  // ── Footer bar ────────────────────────────────────────────
+  const footerY = H - footerH;
+
+  // Footer background — slightly lighter than bg
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(0, footerY, W, footerH);
+
+  // Top separator line
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth   = 1 * sc;
+  ctx.beginPath(); ctx.moveTo(M, footerY); ctx.lineTo(W - M, footerY); ctx.stroke();
+
+  // "Oferecimento |" text + logo centered
+  const footMidY  = footerY + footerH * 0.5;
+  const logoH     = footerH * 0.52;
+  const logoW     = logoH * 2.04; // aspect ratio 274:134
+  const textFs    = 28 * sc;
+
+  ctx.font         = `300 ${textFs}px 'DM Sans', sans-serif`;
+  ctx.fillStyle    = 'rgba(255,255,255,0.45)';
+  ctx.textAlign    = 'right';
+  ctx.textBaseline = 'middle';
+
+  // Measure text to compute total group width for centering
+  const label     = 'Oferecimento  |';
+  const textW     = ctx.measureText(label).width;
+  const gap       = 22 * sc;
+  const groupW    = textW + gap + logoW;
+  const groupX    = (W - groupW) / 2;
+
+  ctx.fillText(label, groupX + textW, footMidY);
+
+  // Draw logo image
+  if (window._logoImg && window._logoImg.complete) {
+    ctx.globalAlpha = 0.75;
+    ctx.drawImage(window._logoImg, groupX + textW + gap, footMidY - logoH/2, logoW, logoH);
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+}
+
+function drawRowStat(ctx, x, midY, icon, value, sc) {
+  ctx.textBaseline = 'middle';
+
+  // Mede largura do valor para centralizar o conjunto ícone + valor
+  const iconFs  = 18 * sc;
+  const valueFs = 26 * sc;
+  const gap     = 6 * sc;
+
+  ctx.font = `600 ${valueFs}px 'Inter', sans-serif`;
+  const valueW = ctx.measureText(value).width;
+  const iconW  = iconFs; // aproximação quadrada para emoji
+  const totalW = iconW + gap + valueW;
+  const startX = x - totalW / 2;
+
+  // Ícone
+  ctx.font      = `${iconFs}px serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.50)';
+  ctx.textAlign = 'left';
+  ctx.fillText(icon, startX, midY);
+
+  // Valor
+  ctx.font      = `600 ${valueFs}px 'Inter', sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.88)';
+  ctx.fillText(value, startX + iconW + gap, midY);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y); ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r); ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h); ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r); ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.closePath();
+}
+
+// ── Day draw — hourly rows ───────────────────────────────────
+function drawFrameDay(canvas, fmt, t) {
+  if (!dayData || !dayData.allSlots) return;
+  // Re-filtra slots pela data selecionada em tempo real
+  const selD   = getSelectedDate();
+  const selStr = selD.toISOString().slice(0, 10); // "YYYY-MM-DD"
+  dayData.slots = dayData.buildSlots(selStr);
+  if (!dayData.slots || !dayData.slots.length) return;
+
+  const W   = canvas.width;
+  const H   = canvas.height;
+  const sc  = W / 1080;
+  const ctx = canvas.getContext('2d');
+  const sp  = 1.0;
+
+  // Background
+  const bg1  = document.getElementById('bg1').value;
+  const bg2  = document.getElementById('bg2').value;
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, bg1); grad.addColorStop(1, bg2);
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+
+  const glow = ctx.createRadialGradient(W*.5, H*.3, 0, W*.5, H*.3, W*.9);
+  glow.addColorStop(0,'rgba(80,130,220,0.07)'); glow.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+
+  const slots    = dayData.slots;
+  const N        = slots.length; // 8
+  const divColor = document.getElementById('divCol').value;
+  const todayColor = document.getElementById('todayCol').value;
+
+  // ── Header ──────────────────────────────────────────────
+  const headerH = H * 0.10;
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+
+  ctx.font      = `700 ${70*sc}px 'DM Sans', sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.92)';
+  ctx.fillText(dayData.city.toUpperCase(), W*.5, headerH * .38);
+
+  const daySelDate = getSelectedDate();
+  ctx.font      = `400 ${26*sc}px 'Inter', sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.32)';
+  ctx.fillText(
+    daySelDate.toLocaleDateString('pt-BR',{weekday:'long',day:'numeric',month:'long'}).toUpperCase(),
+    W*.5, headerH * .75
+  );
+
+  const footerH = H * 0.07;
+  const rowsH   = H - headerH - footerH - 8*sc;
+  const rowH    = rowsH / N;
+
+  const M   = 60 * sc;
+  const USE = W - M * 2;
+
+  // Header divider
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+  ctx.lineWidth   = 1 * sc;
+  ctx.beginPath(); ctx.moveTo(M, headerH); ctx.lineTo(W-M, headerH); ctx.stroke();
+
+  // Column positions — hora | ícone | temperatura | chuva | vento
+  const COL = {
+    hour: M + USE * 0.00,
+    icon: M + USE * 0.22,
+    temp: M + USE * 0.46,
+    rain: M + USE * 0.68,
+    wind: M + USE * 0.90,
+  };
+
+  // Column header labels
+  const colLabelY = headerH + rowH * .18;
+  ctx.font      = `600 ${20*sc}px 'Inter', sans-serif`;
+  ctx.fillStyle = 'rgba(255,255,255,0.22)';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  [
+    [COL.temp, 'TEMPERATURA'],
+    [COL.rain, 'CHUVA'],
+    [COL.wind, 'VENTO'],
+  ].forEach(([x,l]) => ctx.fillText(l, x, colLabelY));
+
+  for (let i = 0; i < N; i++) {
+    const s   = slots[i];
+    const ck  = s.condKey;
+    const rowY = headerH + i * rowH;
+    const midY = rowY + rowH * .5;
+
+    // Row divider
+    if (i > 0) {
+      ctx.strokeStyle = divColor + '55';
+      ctx.lineWidth   = 1 * sc;
+      ctx.beginPath(); ctx.moveTo(M * .4, rowY); ctx.lineTo(W - M*.4, rowY); ctx.stroke();
+    }
+
+    ctx.textBaseline = 'middle';
+
+    // ── Hora ──────────────────────────────────────────────
+    ctx.textAlign = 'left';
+    ctx.font      = `700 ${38*sc}px 'Inter', sans-serif`;
+    ctx.fillStyle = 'rgba(255,255,255,0.90)';
+    ctx.fillText(s.hour, COL.hour, midY);
+
+    // ── Ícone ─────────────────────────────────────────────
+    drawIcon(ctx, ck, COL.icon, midY, rowH * .52, t, sp);
+
+    // ── Temperatura ───────────────────────────────────────
+    ctx.textAlign = 'center';
+    ctx.font      = `700 ${52*sc}px 'Inter', sans-serif`;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`${s.temp}°`, COL.temp, midY);
+
+    // ── Chuva ─────────────────────────────────────────────
+    drawRowStat(ctx, COL.rain, midY, '🌧', s.rain_prob !== '—' ? `${s.rain_prob}%` : '—', sc);
+
+    // ── Vento ─────────────────────────────────────────────
+    drawRowStat(ctx, COL.wind, midY, '💨', `${s.wind}`, sc);
+  }
+
+  // Footer
+  const footerY = H - footerH;
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(0, footerY, W, footerH);
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth   = 1 * sc;
+  ctx.beginPath(); ctx.moveTo(M, footerY); ctx.lineTo(W-M, footerY); ctx.stroke();
+
+  const footMidY = footerY + footerH * 0.5;
+  const logoH    = footerH * 0.52;
+  const logoW    = logoH * 2.04;
+  const textFs   = 28 * sc;
+  ctx.font         = `300 ${textFs}px 'DM Sans', sans-serif`;
+  ctx.fillStyle    = 'rgba(255,255,255,0.45)';
+  ctx.textAlign    = 'right';
+  ctx.textBaseline = 'middle';
+  const label  = 'Oferecimento  |';
+  const textW  = ctx.measureText(label).width;
+  const gap    = 22 * sc;
+  const groupW = textW + gap + logoW;
+  const groupX = (W - groupW) / 2;
+  ctx.fillText(label, groupX + textW, footMidY);
+  if (window._logoImg && window._logoImg.complete) {
+    ctx.globalAlpha = 0.75;
+    ctx.drawImage(window._logoImg, groupX + textW + gap, footMidY - logoH/2, logoW, logoH);
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+}
+
+// ── Animation loop ────────────────────────────────────────────
+function renderBoth() {
+  if (animFrame) cancelAnimationFrame(animFrame);
+  tStart = tStart || performance.now();
+  function loop(now) {
+    const t = now - tStart;
+    FMTS.forEach(fmt => {
+      const hasData = (currentMode === 'day' ? dayData : weekData);
+      if (hasData) {
+        try { drawFrame(document.getElementById(fmt.cvId), fmt, t); }
+        catch(e) { console.error('[drawFrame error]', e); }
+      }
+    });
+    animFrame = requestAnimationFrame(loop);
+  }
+  animFrame = requestAnimationFrame(loop);
+}
+
+// ── Canvas setup ──────────────────────────────────────────────
+function setupCanvases() {
+  FMTS.forEach(fmt => {
+    const cv = document.getElementById(fmt.cvId);
+    cv.width  = Math.round(fmt.w * PREVIEW_SCALE);
+    cv.height = Math.round(fmt.h * PREVIEW_SCALE);
+  });
+}
+
+// ── Encoder nativo (WebCodecs) ─────────────────────────────────
+// Codecs candidatos, do melhor para o mais compatível
+const CODEC_CANDIDATES = [
+  { codec: 'hvc1.1.6.L153.B0', muxerCodec: 'hevc', label: 'H.265 / HEVC' },
+  { codec: 'hev1.1.6.L153.B0', muxerCodec: 'hevc', label: 'H.265 / HEVC' },
+  { codec: 'avc1.640033',      muxerCodec: 'avc',  label: 'H.264 High 5.1' },
+  { codec: 'avc1.640032',      muxerCodec: 'avc',  label: 'H.264 High 5.0' },
+  { codec: 'avc1.64002A',      muxerCodec: 'avc',  label: 'H.264 High 4.2' },
+  { codec: 'avc1.42E033',      muxerCodec: 'avc',  label: 'H.264 Baseline' },
+];
+
+async function initEncoder() {
+  const statusEl  = document.getElementById('encStatus');
+  const spinnerEl = document.getElementById('encSpinner');
+  const txtEl     = document.getElementById('encTxt');
+  const retryEl   = document.getElementById('encRetryBtn');
+
+  statusEl.className = 'ffmpeg-status loading';
+  spinnerEl.style.display = 'inline-block';
+  txtEl.textContent = 'Verificando encoder…';
+  retryEl.style.display = 'none';
+
+  try {
+    // WebCodecs é nativo — não precisa de SharedArrayBuffer nem WASM
+    if (typeof VideoEncoder === 'undefined') {
+      throw new Error('WebCodecs não suportado — use Chrome/Edge 94+');
+    }
+
+    // Carrega o muxer MP4 (biblioteca leve, ~40KB)
+    await new Promise((resolve, reject) => {
+      if (window.Mp4Muxer) { resolve(); return; }
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.min.js';
+      s.onload  = resolve;
+      s.onerror = () => reject(new Error('Falha ao carregar mp4-muxer'));
+      document.head.appendChild(s);
+    });
+
+    if (!window.Mp4Muxer) throw new Error('mp4-muxer não disponível');
+
+    // Testa os codecs na maior resolução (1080×2560) para garantir suporte
+    let chosen = null;
+    for (const cand of CODEC_CANDIDATES) {
+      try {
+        const sup = await VideoEncoder.isConfigSupported({
+          codec: cand.codec,
+          width: 1080, height: 2560,
+          bitrate: 3_000_000, framerate: 25,
+        });
+        if (sup.supported) { chosen = cand; break; }
+      } catch {}
+    }
+
+    if (!chosen) throw new Error('Nenhum codec H.264/H.265 suportado');
+
+    encoderCodec = chosen;
+    encoderReady = true;
+
+    statusEl.className = 'ffmpeg-status ready';
+    spinnerEl.style.display = 'none';
+    txtEl.textContent = `✓ Encoder nativo — ${chosen.label}`;
+    retryEl.style.display = 'none';
+
+    if (weekData || dayData) enableRecButtons();
+    setSt('Encoder pronto', true);
+
+  } catch(e) {
+    encoderReady = false;
+    statusEl.className = 'ffmpeg-status';
+    spinnerEl.style.display = 'none';
+    txtEl.textContent = 'Erro: ' + e.message;
+    retryEl.style.display = 'block';
+    toast('Encoder: ' + e.message, 'err');
+    console.error(e);
+  }
+}
+
+// ── Recording ─────────────────────────────────────────────────
+function enableRecButtons() {
+  if (!encoderReady) return;
+  ['recBtn','recBtn2','recBtnBoth'].forEach(id => document.getElementById(id).disabled = false);
+}
+
+function setRecUI(on) {
+  document.getElementById('recStatus').classList.toggle('visible', on);
+  document.getElementById('recProgress').classList.toggle('visible', on);
+  document.getElementById('stopBtn').disabled = !on;
+  ['recBtn','recBtn2','recBtnBoth'].forEach(id => document.getElementById(id).disabled = on);
+}
+
+function setProgress(pct, label) {
+  document.getElementById('recFill').style.width = pct + '%';
+  document.getElementById('recLabel').textContent = label;
+}
+
+// Codifica um formato frame a frame e retorna o blob MP4
+// Sem MediaRecorder, sem FFmpeg: duração e fps são exatos por construção
+async function recordOne(fmt, phaseLabel) {
+  const FPS         = 25;
+  const TOTAL_FRAMES = FPS * recDuration;          // ex: 25 × 10 = 250 frames
+  const FRAME_US     = Math.round(1_000_000 / FPS); // 40000 µs por frame
+
+  // Garante que as fontes estão carregadas antes de rasterizar
+  if (document.fonts && document.fonts.ready) await document.fonts.ready;
+
+  // Canvas na resolução exata de saída
+  const ec  = document.createElement('canvas');
+  ec.width  = fmt.w;
+  ec.height = fmt.h;
+
+  const { Muxer, ArrayBufferTarget } = window.Mp4Muxer;
+
+  const muxer = new Muxer({
+    target: new ArrayBufferTarget(),
+    video: {
+      codec:  encoderCodec.muxerCodec,
+      width:  fmt.w,
+      height: fmt.h,
+      frameRate: FPS,
+    },
+    fastStart: 'in-memory',   // equivalente ao -movflags +faststart
+  });
+
+  let encodeError = null;
+  const encoder = new VideoEncoder({
+    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    error:  e => { encodeError = e; },
+  });
+
+  encoder.configure({
+    codec:       encoderCodec.codec,
+    width:       fmt.w,
+    height:      fmt.h,
+    bitrate:     3_000_000,        // 3 Mbps (teto de 3.5 Mbps respeitado)
+    framerate:   FPS,
+    bitrateMode: 'variable',
+    latencyMode: 'quality',
+  });
+
+  document.getElementById('recTxt').textContent = `Codificando ${fmt.w}×${fmt.h}…`;
+
+  for (let i = 0; i < TOTAL_FRAMES; i++) {
+    if (cancelRequested) { encoder.close(); return null; }
+    if (encodeError) throw encodeError;
+
+    // Tempo determinístico: cada frame corresponde a um instante exato
+    drawFrame(ec, fmt, i * (1000 / FPS));
+
+    const frame = new VideoFrame(ec, { timestamp: i * FRAME_US, duration: FRAME_US });
+    encoder.encode(frame, { keyFrame: i % (FPS * 2) === 0 }); // keyframe a cada 2s
+    frame.close();
+
+    // Progresso + cede o controle ao browser para não travar a UI
+    const pct = ((i + 1) / TOTAL_FRAMES) * 100;
+    setProgress(pct, `${phaseLabel} — frame ${i + 1}/${TOTAL_FRAMES}`);
+
+    // Backpressure: espera se a fila do encoder estiver cheia
+    if (encoder.encodeQueueSize > 8 || i % 5 === 0) {
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+
+  setProgress(100, `Finalizando ${fmt.w}×${fmt.h}…`);
+  await encoder.flush();
+  encoder.close();
+  if (encodeError) throw encodeError;
+
+  muxer.finalize();
+  return new Blob([muxer.target.buffer], { type: 'video/mp4' });
+}
+
+function buildFilename(fmt) {
+  // Usa a data do campo (semana = editável, dia = amanhã fixo)
+  const d    = getSelectedDate();
+  const YYYY = d.getFullYear();
+  const MM   = String(d.getMonth() + 1).padStart(2, '0');
+  const DD   = String(d.getDate()).padStart(2, '0');
+  const aa   = fmt.h === 1920 ? '32' : '25';
+  const b    = currentMode === 'week' ? '1' : '2';
+  return `weather-${YYYY}${MM}${DD}-${aa}-${b}-10.mp4`;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a   = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function startRecording(fmtIdx) {
+  if (!weekData)    return toast('Busque a previsão primeiro.', 'err');
+  if (!encoderReady) return toast('Encoder não disponível.', 'err');
+
+  cancelRequested = false;
+  setRecUI(true);
+  const fmt = FMTS[fmtIdx];
+
+  try {
+    const mp4 = await recordOne(fmt, 'Fase 1/2');
+    if (!mp4) { setSt('Cancelado'); return; }
+
+    const sizeMB  = (mp4.size / 1024 / 1024).toFixed(1);
+    downloadBlob(mp4, buildFilename(fmt));
+
+    setProgress(100, `✓ ${fmt.w}×${fmt.h} — ${sizeMB} MB`);
+    toast(`✓ MP4 ${sizeMB}MB salvo!`, 'ok');
+    setSt('MP4 exportado', true);
+  } catch(e) {
+    toast('Erro: ' + e.message, 'err');
+    setSt('Erro', false, true);
+    console.error(e);
+  } finally {
+    setRecUI(false);
+  }
+}
+
+async function startRecordingBoth() {
+  if (!weekData)    return toast('Busque a previsão primeiro.', 'err');
+  if (!encoderReady) return toast('Encoder não disponível.', 'err');
+
+  cancelRequested = false;
+  setRecUI(true);
+  try {
+    // Grava e converte os dois em sequência
+    for (let i = 0; i < FMTS.length; i++) {
+      if (cancelRequested) break;
+      const fmt   = FMTS[i];
+      const phase = `${i+1}/${FMTS.length} — ${fmt.w}×${fmt.h}`;
+      const mp4   = await recordOne(fmt, phase);
+      if (!mp4) break;
+
+      const sizeMB = (mp4.size / 1024 / 1024).toFixed(1);
+      downloadBlob(mp4, buildFilename(fmt));
+      setProgress(100, `✓ ${fmt.w}×${fmt.h} — ${sizeMB} MB`);
+      toast(`✓ ${fmt.w}×${fmt.h} — ${sizeMB}MB`, 'ok');
+    }
+
+    if (!cancelRequested) {
+      setSt('Ambos exportados', true);
+      toast('✓ Dois vídeos salvos!', 'ok');
+    } else {
+      setSt('Cancelado');
+    }
+  } catch(e) {
+    toast('Erro: ' + e.message, 'err');
+    setSt('Erro', false, true);
+    console.error(e);
+  } finally {
+    setRecUI(false);
+  }
+}
+
+function stopRecording() {
+  cancelRequested = true;
+  if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.stop();
+}
+
+// ── Utils ─────────────────────────────────────────────────────
+function syncC(id) { document.getElementById(id+'Prev').style.background = document.getElementById(id).value; }
+function rng(el, id) { document.getElementById(id).textContent = parseFloat(el.value).toFixed(1); }
+function toast(m, t='') {
+  const el = document.getElementById('toast');
+  el.textContent = m; el.className = 'show ' + t;
+  clearTimeout(el._t); el._t = setTimeout(() => el.className = '', 3000);
+}
+function setSt(txt, ok=false, err=false) {
+  document.getElementById('sTxt').textContent = txt;
+  document.getElementById('sDot').className = 'dot' + (ok?' ok':err?' err':'');
+}
+
+// ── Init ──────────────────────────────────────────────────────
+// Preload sponsor logo
+(function() {
+  const img = new Image();
+  img.src = 'data:image/png;base64,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';
+  img.onload = () => { window._logoImg = img; };
+})();
+
+// Pré-preenche a data com amanhã e deixa desabilitado até clicar num modo
+(function() {
+  const t = new Date(); t.setDate(t.getDate() + 1);
+  const el = document.getElementById('dateInput');
+  el.value    = t.toISOString().slice(0, 10);
+  el.disabled = true;
+})();
+
+setupCanvases();
+checkProxy();
+initEncoder();
+</script>
+</body>
+</html>

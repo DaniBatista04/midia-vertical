@@ -1,0 +1,45 @@
+import { NextResponse, type NextRequest } from "next/server";
+
+import { SESSION_COOKIE, verifySession } from "@/lib/server/session";
+
+/**
+ * Portão de acesso do painel.
+ *
+ * Tudo passa por aqui — inclusive /api/feed, /api/image e /api/weather. Era
+ * esse o buraco da versão anterior: as rotas de proxy ficavam abertas para
+ * qualquer um assim que o app subisse.
+ */
+
+/** Rotas que precisam responder sem sessão. */
+const PUBLIC_PATHS = new Set(["/login", "/api/login", "/api/logout", "/api/health"]);
+
+export async function proxy(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+
+  if (PUBLIC_PATHS.has(pathname)) return NextResponse.next();
+
+  if (await verifySession(req.cookies.get(SESSION_COOKIE)?.value)) {
+    return NextResponse.next();
+  }
+
+  // API responde 401; página redireciona para o login guardando o destino.
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+  }
+
+  const url = req.nextUrl.clone();
+  url.pathname = "/login";
+  url.search = "";
+  if (pathname !== "/") url.searchParams.set("next", pathname);
+  return NextResponse.redirect(url);
+}
+
+export const config = {
+  matcher: [
+    /*
+     * Tudo, menos os internos do Next e os arquivos estáticos que a própria
+     * tela de login precisa carregar (fontes, máscaras, logo).
+     */
+    "/((?!_next/static|_next/image|favicon.ico|fonts/|assets/|.*\\.(?:png|jpe?g|svg|ico|woff2?)$).*)",
+  ],
+};
