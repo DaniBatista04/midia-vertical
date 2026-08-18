@@ -20,7 +20,7 @@
  *   KUMA_CLIMA_CIDADE     cityId; padrão 6003 (São Paulo)
  *   KUMA_CLIMA_PREDIOS    buildingIds separados por vírgula, ou
  *   KUMA_CLIMA_TELAS      locationIds separados por vírgula
- *   KUMA_CLIMA_FREQUENCIA exibições/dia por tela; padrão 600 (múltiplo de 300)
+ *   KUMA_CLIMA_FREQUENCIA exibições/dia por tela; padrão 240
  */
 
 import { agendarClima, descreverResultado, horasDaJanela } from "../src/lib/kuma/agendar";
