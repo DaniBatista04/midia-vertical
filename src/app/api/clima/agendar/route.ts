@@ -5,10 +5,13 @@ import type { NextRequest } from "next/server";
 import {
   AgendamentoError,
   agendarClima,
+  dataEmSaoPaulo,
   descreverResultado,
   horasDaJanela,
+  nomeDoPlano,
   type ResultadoAgendamento,
 } from "@/lib/kuma/agendar";
+import { renomearPlano } from "@/lib/kuma/client";
 import { SESSION_COOKIE, verifySession } from "@/lib/server/session";
 
 export const runtime = "nodejs";
@@ -141,6 +144,28 @@ export async function GET(req: NextRequest) {
   }
 
   const params = req.nextUrl.searchParams;
+
+  // Ferramenta de operação: renomear um plano que já existe, para arrumar à mão
+  // o que nasceu antes de a automação passar a nomear sozinha.
+  const renomear = params.get("renomear");
+  if (renomear) {
+    const nome = params.get("nome") ?? nomeDoPlano(params.get("data") ?? dataEmSaoPaulo(0));
+    try {
+      await renomearPlano(renomear, nome);
+      const msg = `Plano ${renomear} renomeado para "${nome}".`;
+      console.log(`[agendar/${origem}] ${msg}`);
+      return querHtml(req)
+        ? pagina("Renomeado", msg, "", "#16a34a")
+        : Response.json({ ok: true, plano: renomear, nome });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error(`[agendar/${origem}] renomear falhou: ${msg}`);
+      return querHtml(req)
+        ? pagina("Falhou", msg, "O plano não foi renomeado.", "#dc2626", 500)
+        : Response.json({ ok: false, error: msg }, { status: 500 });
+    }
+  }
+
   const opcoes = {
     data: params.get("data") ?? undefined,
     simular: params.get("simular") === "true",
@@ -180,3 +205,15 @@ export async function GET(req: NextRequest) {
 
 /** Mesmo comportamento por POST, para quem preferir chamar de script. */
 export const POST = GET;
+
+/**
+ * `HEAD` não faz nada, e precisa ser declarado para isso.
+ *
+ * Sem esta função o Next serve `HEAD` a partir do `GET` — e o `GET` aqui cria
+ * unidade. Foi medido em produção: o navegador disparou um `HEAD` na hora de
+ * abrir o link e criou uma unidade três segundos antes do clique de verdade,
+ * que criou a segunda. Requisição de pré-checagem não pode travar tela.
+ */
+export function HEAD() {
+  return new Response(null, { status: 204 });
+}

@@ -23,9 +23,10 @@ import {
   inquireSufficientTargets,
   kumaConfig,
   KumaError,
+  renomearPlano,
   type KumaConfig,
 } from "./client";
-import { caminhoEstado, type EstadoDoDia } from "./estado";
+import { caminhoEstado, LEASE_SEGUNDOS, type EstadoDoDia } from "./estado";
 import { lerJson, uploadPublico } from "../server/supabaseUpload";
 
 /** São Paulo. */
@@ -57,6 +58,18 @@ export function dataEmSaoPaulo(deslocamentoEmDias = 0): string {
     month: "2-digit",
     day: "2-digit",
   }).format(agora);
+}
+
+/**
+ * Nome do plano na lista do portal: a data em que aquilo vai ao ar, `MM/DD`.
+ *
+ * A ordem é mês/dia, não dia/mês — é como a equipe nomeia hoje (o exemplo que
+ * me deram para 19 de agosto foi `08/19`) e como o portal apresenta data. Muda
+ * aqui se a convenção mudar; é o único lugar que decide isso.
+ */
+export function nomeDoPlano(dataISO: string): string {
+  const [, mes, dia] = dataISO.split("-");
+  return `${mes}/${dia}`;
 }
 
 export type ResultadoAgendamento =
@@ -168,6 +181,15 @@ async function resolverTelas(cidade: string, log: (m: string) => void): Promise<
   return locais.map((l) => l.locationId);
 }
 
+/** Grava o registro do dia. Campo `undefined` some do JSON, que é o desejado. */
+async function gravarEstado(caminho: string, estado: EstadoDoDia): Promise<void> {
+  await uploadPublico({
+    caminho,
+    conteudo: Buffer.from(JSON.stringify(estado, null, 2)),
+    contentType: "application/json",
+  });
+}
+
 /**
  * A unidade que o registro do dia aponta ainda vale?
  *
@@ -188,7 +210,10 @@ async function unidadeAindaVale(
 ): Promise<{ vale: boolean; motivo: string }> {
   try {
     const detalhe = await getOrderDetail(unidadeId, cfg);
-    const morta = detalhe.orderStatus === "CANCELLED" || detalhe.orderStatus === "TERMINATED";
+    // Só `CANCELLED` libera recriar. `TERMINATED` e `FINISH` são unidade que
+    // já cumpriu (ou encerrou) o papel dela — recriar em cima disso é inventar
+    // veiculação que ninguém pediu, ainda mais num dia passado.
+    const morta = detalhe.orderStatus === "CANCELLED";
     return { vale: !morta, motivo: detalhe.orderStatus.toLowerCase() };
   } catch (e) {
     const erro = e instanceof KumaError ? e : null;
@@ -239,6 +264,16 @@ async function processar(
   }
 
   if (estado.unidadeId) {
+    // Registro gravado há pouco é confiável sem perguntar à API. O cron roda a
+    // cada minuto: confirmar a unidade toda vez seria mais de mil chamadas por
+    // dia ao Kuma para reconfirmar algo que acabamos de escrever. A confirmação
+    // existe para registro **velho** — de um teste antigo, de outro dia — que é
+    // o caso em que a unidade pode ter morrido sem ninguém atualizar o arquivo.
+    const idade = estado.agendadoEm ? Date.now() - Date.parse(estado.agendadoEm) : Infinity;
+    if (idade < 12 * 60 * 60 * 1_000) {
+      log(`${data}: já agendado na unidade ${estado.unidadeId}`);
+      return { estado: "ja-agendado", data, unidadeId: estado.unidadeId };
+    }
     const anterior = await unidadeAindaVale(estado.unidadeId, cfg);
     if (anterior.vale) {
       log(`${data}: já agendado na unidade ${estado.unidadeId} (${anterior.motivo})`);
@@ -294,6 +329,22 @@ async function processar(
     return { estado: "simulado", data, grupoId: estado.grupoId, telasDisponiveis: disponiveis.length };
   }
 
+  if (!ensaio) {
+    // Última leitura antes de criar, agora que inventário e auditoria já
+    // custaram alguns segundos: outra chamada pode ter agendado nesse meio.
+    const agora = await lerJson<EstadoDoDia>(caminho);
+    if (agora?.unidadeId) {
+      log(`${data}: outra execução agendou na unidade ${agora.unidadeId} — nada a fazer`);
+      return { estado: "ja-agendado", data, unidadeId: agora.unidadeId };
+    }
+    const emCurso = agora?.criandoEm ? Date.parse(agora.criandoEm) : 0;
+    if (emCurso && Date.now() - emCurso < LEASE_SEGUNDOS * 1_000) {
+      log(`${data}: outra execução está criando a unidade desde ${agora!.criandoEm} — saindo`);
+      return { estado: "pendente", data, grupoId: estado.grupoId, auditoria: "criação em andamento" };
+    }
+    await gravarEstado(caminho, { ...estado, criandoEm: new Date().toISOString() });
+  }
+
   const unidadeId = await createOrder(
     {
       cityId: cidade,
@@ -318,9 +369,25 @@ async function processar(
     await cancelOrder(unidadeId, cfg).catch((err) =>
       console.error(`[agendar] cancelamento também falhou, cancele no portal: ${err}`),
     );
+    // Solta a marca para o próximo ciclo poder tentar, em vez de esperar ela
+    // vencer sozinha.
+    if (!ensaio) {
+      await gravarEstado(caminho, { ...estado, criandoEm: undefined }).catch(() => {});
+    }
     throw e;
   }
   log(`grupo ${estado.grupoId} amarrado à unidade`);
+
+  // O plano nasce sem nome útil, e quem opera precisa achá-lo na lista pela
+  // data em que aquilo vai ao ar. Falhar aqui não derruba o agendamento: a
+  // veiculação já está de pé, e nome errado se conserta no portal.
+  const nome = nomeDoPlano(data);
+  try {
+    await renomearPlano(unidadeId, nome, cfg);
+    log(`plano renomeado para "${nome}"`);
+  } catch (e) {
+    log(`não consegui renomear o plano para "${nome}": ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   const detalhe = await getOrderDetail(unidadeId, cfg);
   const travadas = detalhe.orderItems[0]?.reservedLocationIds?.length ?? 0;
@@ -329,16 +396,12 @@ async function processar(
   if (ensaio) {
     log("ensaio: registro do dia preservado — cancele a unidade no portal ao terminar");
   } else {
-    await uploadPublico({
-      caminho,
-      conteudo: Buffer.from(
-        JSON.stringify(
-          { ...estado, unidadeId, agendadoEm: new Date().toISOString(), telas: travadas },
-          null,
-          2,
-        ),
-      ),
-      contentType: "application/json",
+    await gravarEstado(caminho, {
+      ...estado,
+      unidadeId,
+      agendadoEm: new Date().toISOString(),
+      telas: travadas,
+      criandoEm: undefined,
     });
     log("estado do dia atualizado");
   }

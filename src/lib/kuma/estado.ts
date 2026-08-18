@@ -21,7 +21,27 @@ export type EstadoDoDia = {
   unidadeId?: string;
   agendadoEm?: string;
   telas?: number;
+  /**
+   * Marca de "estou criando a unidade agora", gravada antes da criação e
+   * apagada depois.
+   *
+   * Sem ela, duas chamadas quase simultâneas leem o registro sem unidade, as
+   * duas se acham a primeira, e nascem duas unidades travando as mesmas telas.
+   * Aconteceu em produção com três segundos de diferença. Não é trava perfeita
+   * — o Storage não tem escrita condicional — mas fecha a janela de segundos
+   * para a de milissegundos, e o cron de minuto nunca mais reincide.
+   */
+  criandoEm?: string;
 };
+
+/**
+ * Por quanto tempo uma marca de criação em andamento é respeitada.
+ *
+ * Precisa cobrir a criação mais lenta (criar unidade, amarrar criativo e ler o
+ * detalhe, contra uma API que às vezes demora), e ser curta o bastante para um
+ * processo morto no meio não bloquear o dia inteiro.
+ */
+export const LEASE_SEGUNDOS = 180;
 
 export function caminhoEstado(dataISO: string): string {
   return `clima/estado/${dataISO}.json`;
