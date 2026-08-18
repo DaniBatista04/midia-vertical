@@ -152,6 +152,18 @@ auditoria do time levanta, e o que explica o `getOrderDetail` do plano falhar co
 `resource not found [BizId:60428]` — então **não existe caminho por API** para
 amarrar criativo nela. Não testado ainda; é a próxima pergunta para a Brato.
 
+### A janela de veiculação existe na API, e nós não usávamos
+
+As telas tocam comunicado em faixas de duas horas — 10h–12h até 16h–18h. Tanto
+`createOrder` quanto `inquireSufficientTargets` aceitam um campo **`hours`**
+(`投放时段，包括哪些小时` — "quais horas incluir"), um array de horas cheias: a
+janela das 16h às 18h é `[16, 17]`. Nenhum dos PDFs menciona esse campo; ele
+apareceu ao ler o contrato do gateway.
+
+Enquanto o clima não mandava `hours`, a unidade nascia sem faixa declarada e a
+distribuição das exibições ao longo do dia ficava por conta do Kuma. Agora dá
+para escolher, por `KUMA_CLIMA_JANELA` ou por chamada.
+
 ### Erros e limites que a documentação erra ou omite
 
 | Coisa | O que o PDF diz | O que a API faz |

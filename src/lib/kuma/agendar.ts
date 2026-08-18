@@ -80,9 +80,40 @@ export type OpcoesAgendamento = {
   simular?: boolean;
   cidade?: string;
   frequencia?: number;
+  /** Janela de veiculação em horas cheias. Ver `horasDaJanela`. */
+  horas?: number[];
   log?: (mensagem: string) => void;
   cfg?: KumaConfig;
 };
+
+/**
+ * Janela de veiculação, em horas cheias.
+ *
+ * As telas tocam comunicado em janelas de duas horas — 10h–12h, 12h–14h, até
+ * 16h–18h — e a API recebe isso como a lista de horas incluídas: a janela das
+ * 16h é `[16, 17]`. Aceita `"16,17"` e também `"16-18"`, que é como a janela é
+ * falada no dia a dia e cujo fim é exclusivo.
+ *
+ * Sem configuração, devolve `undefined` e o campo nem vai no pedido — o Kuma
+ * decide, que é como o clima funcionou até aqui.
+ */
+export function horasDaJanela(valor: string | undefined): number[] | undefined {
+  const cru = (valor ?? "").trim();
+  if (!cru) return undefined;
+
+  const intervalo = cru.match(/^(\d{1,2})\s*-\s*(\d{1,2})$/);
+  const horas = intervalo
+    ? Array.from(
+        { length: Number(intervalo[2]) - Number(intervalo[1]) },
+        (_, i) => Number(intervalo[1]) + i,
+      )
+    : cru.split(",").map((h) => Number(h.trim()));
+
+  if (!horas.length || horas.some((h) => !Number.isInteger(h) || h < 0 || h > 23)) {
+    throw new Error(`janela de veiculação inválida: "${cru}" — use "16,17" ou "16-18"`);
+  }
+  return horas;
+}
 
 /** Erro de agendamento que já vem com texto pronto para quem opera. */
 export class AgendamentoError extends Error {
@@ -165,9 +196,10 @@ async function processar(
   opts: Required<Pick<OpcoesAgendamento, "cidade" | "frequencia" | "simular">> & {
     cfg: KumaConfig;
     log: (m: string) => void;
+    horas?: number[];
   },
 ): Promise<ResultadoAgendamento | null> {
-  const { cfg, log, cidade, frequencia, simular } = opts;
+  const { cfg, log, cidade, frequencia, simular, horas } = opts;
   const caminho = caminhoEstado(data);
   const estado = await lerJson<EstadoDoDia>(caminho);
   if (!estado) return null;
@@ -181,7 +213,8 @@ async function processar(
     log(`${data}: a unidade ${estado.unidadeId} do registro está ${anterior.motivo} — agendando de novo`);
   }
 
-  log(`${data}: grupo ${estado.grupoId} · cidade ${cidade} · ${frequencia} exibições/dia`);
+  const janela = horas?.length ? ` · janela ${horas[0]}h–${horas[horas.length - 1] + 1}h` : "";
+  log(`${data}: grupo ${estado.grupoId} · cidade ${cidade} · ${frequencia} exibições/dia${janela}`);
 
   const grupo = await getCreativeGroup(estado.grupoId, cfg);
   const auditoria = descreverAuditoria(grupo.audit.status);
@@ -206,6 +239,7 @@ async function processar(
       endDate: data,
       durationInSecond: estado.duracao,
       frequency: frequencia,
+      hours: horas,
     },
     cfg,
   );
@@ -230,6 +264,7 @@ async function processar(
       endDate: data,
       durationInSecond: estado.duracao,
       frequency: frequencia,
+      hours: horas,
     },
     cfg,
   );
@@ -288,10 +323,11 @@ export async function agendarClima(opts: OpcoesAgendamento = {}): Promise<Result
   const cidade = opts.cidade ?? process.env.KUMA_CLIMA_CIDADE ?? CIDADE_PADRAO;
   const frequencia = opts.frequencia ?? Number(process.env.KUMA_CLIMA_FREQUENCIA ?? FREQUENCIA_PADRAO);
   const simular = opts.simular ?? false;
+  const horas = opts.horas ?? horasDaJanela(process.env.KUMA_CLIMA_JANELA);
 
   const datas = datasCandidatas(opts.data);
   for (const data of datas) {
-    const r = await processar(data, { cfg, log, cidade, frequencia, simular });
+    const r = await processar(data, { cfg, log, cidade, frequencia, simular, horas });
     if (r) return r;
   }
   log(`nada a agendar em ${datas.join(" nem ")}`);

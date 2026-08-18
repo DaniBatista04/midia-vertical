@@ -222,6 +222,18 @@ export function descreverAuditoria(status: number): string {
    que ela NÃO permite escolher é o tipo de unidade: por API a unidade nasce do
    tipo comum, que trava inventário. Reserva preemptível só pelo portal.        */
 
+/**
+ * Janela de veiculação, em horas cheias (`投放时段，包括哪些小时` no contrato).
+ *
+ * As telas da rede tocam comunicado em janelas de duas horas — 10h–12h,
+ * 12h–14h, e assim por diante. Cada hora entra pelo número dela, então a
+ * janela das 16h às 18h é `[16, 17]`.
+ *
+ * Omitir o campo deixa a decisão com o Kuma, que é como a automação do clima
+ * funcionou até existir motivo para escolher.
+ */
+export type Horas = number[];
+
 export type InventarioRequest = {
   cityId: string;
   /** IDs de tela (`locationId`). */
@@ -232,6 +244,7 @@ export type InventarioRequest = {
   durationInSecond: number;
   /** Exibições por dia por tela. Múltiplo de 300. */
   frequency: number;
+  hours?: Horas;
 };
 
 /** Devolve o subconjunto de telas com inventário no período. */
@@ -258,6 +271,8 @@ export type PedidoRequest = {
   endDate: string;
   durationInSecond: number;
   frequency: number;
+  /** Janela de veiculação. Ver `Horas`. */
+  hours?: Horas;
 };
 
 /**
