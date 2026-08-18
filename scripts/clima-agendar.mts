@@ -10,6 +10,7 @@
  *   npm run clima:agendar                 agenda o clima de hoje, se aprovado
  *   npm run clima:agendar -- --data=...   um dia específico
  *   npm run clima:agendar -- --simular    faz tudo menos criar e amarrar
+ *   npm run clima:agendar -- --janela=16-18   só na janela das 16h às 18h
  *
  * Sair com código 0 sem agendar é normal: significa "ainda não aprovado".
  * Código 1 é problema de verdade — criativo reprovado, inventário insuficiente
@@ -22,7 +23,7 @@
  *   KUMA_CLIMA_FREQUENCIA exibições/dia por tela; padrão 600 (múltiplo de 300)
  */
 
-import { agendarClima, descreverResultado } from "../src/lib/kuma/agendar";
+import { agendarClima, descreverResultado, horasDaJanela } from "../src/lib/kuma/agendar";
 
 const arg = (nome: string): string | undefined =>
   process.argv.find((a) => a.startsWith(`--${nome}=`))?.slice(nome.length + 3);
@@ -35,6 +36,7 @@ async function main() {
   const resultado = await agendarClima({
     data: arg("data"),
     simular: process.argv.includes("--simular"),
+    horas: horasDaJanela(arg("janela")),
     log,
   });
   log(descreverResultado(resultado));

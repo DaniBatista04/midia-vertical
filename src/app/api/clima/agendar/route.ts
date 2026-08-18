@@ -6,6 +6,7 @@ import {
   AgendamentoError,
   agendarClima,
   descreverResultado,
+  horasDaJanela,
   type ResultadoAgendamento,
 } from "@/lib/kuma/agendar";
 import { SESSION_COOKIE, verifySession } from "@/lib/server/session";
@@ -143,6 +144,9 @@ export async function GET(req: NextRequest) {
   const opcoes = {
     data: params.get("data") ?? undefined,
     simular: params.get("simular") === "true",
+    // `?janela=16-18` para veicular só naquela faixa; sem ela vale o padrão do
+    // ambiente, e sem ambiente o Kuma decide.
+    horas: horasDaJanela(params.get("janela") ?? undefined),
     log: (m: string) => console.log(`[agendar/${origem}] ${m}`),
   };
 

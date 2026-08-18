@@ -183,6 +183,18 @@ A data de veiculação é calculada em `America/Sao_Paulo` de forma explícita, 
 não existe workflow onde fixar `TZ` — depois da meia-noite UTC o dia local já
 virou, e a fase procuraria o registro do dia errado.
 
+### Janela de veiculação
+
+As telas tocam comunicado em faixas de duas horas — 10h–12h, 12h–14h, e assim
+até 16h–18h. O `createOrder` e o `inquireSufficientTargets` recebem isso no
+campo `hours` (`投放时段，包括哪些小时`), uma lista das horas cheias incluídas: a
+janela das 16h às 18h é `[16, 17]`.
+
+Configura-se por `KUMA_CLIMA_JANELA` (`16-18` ou `16,17`), e dá para forçar numa
+chamada com `?janela=16-18` no link ou `--janela=16-18` no CLI. Sem nada disso o
+campo não vai no pedido e a decisão fica com o Kuma, que é como o clima
+funcionou até esta janela existir.
+
 O alvo do pedido — `KUMA_CLIMA_PREDIOS` ou `KUMA_CLIMA_TELAS` — **não tem
 padrão**. Unidade criada consome inventário de tela física, e "todas as telas
 da cidade" nunca deve ser o que acontece por omissão.
@@ -211,6 +223,7 @@ npm run clima:diario -- --indice=2       # reenvia o mesmo dia (ver abaixo)
 | `KUMA_CLIMA_TELAS` ou `KUMA_CLIMA_PREDIOS` | alvo do pedido; sem padrão, de propósito |
 | `CRON_SECRET` | a Vercel manda no `Authorization` do cron; sem ela o cron toma 401 |
 | `CLIMA_TOKEN` | o `?t=` do favorito de quem aprova; sem ela esse caminho fica fechado |
+| `KUMA_CLIMA_JANELA` | janela de veiculação, ex.: `16-18`; sem ela o Kuma decide |
 
 As três últimas, mais as do Kuma e do Supabase, precisam existir **no projeto da
 Vercel** — antes eram só secrets do GitHub, e a fase 2 não roda mais lá.
