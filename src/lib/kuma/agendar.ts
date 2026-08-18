@@ -213,7 +213,10 @@ async function unidadeAindaVale(
     // Só `CANCELLED` libera recriar. `TERMINATED` e `FINISH` são unidade que
     // já cumpriu (ou encerrou) o papel dela — recriar em cima disso é inventar
     // veiculação que ninguém pediu, ainda mais num dia passado.
-    const morta = detalhe.orderStatus === "CANCELLED";
+    // "No ar ou a caminho" é o que conta. `FINISH` fica de fora porque unidade
+    // que cumpriu o dia dela não precisa de substituta.
+    const morta =
+      detalhe.orderStatus === "CANCELLED" || detalhe.orderStatus === "TERMINATED";
     return { vale: !morta, motivo: detalhe.orderStatus.toLowerCase() };
   } catch (e) {
     const erro = e instanceof KumaError ? e : null;
@@ -264,22 +267,35 @@ async function processar(
   }
 
   if (estado.unidadeId) {
-    // Registro gravado há pouco é confiável sem perguntar à API. O cron roda a
-    // cada minuto: confirmar a unidade toda vez seria mais de mil chamadas por
-    // dia ao Kuma para reconfirmar algo que acabamos de escrever. A confirmação
-    // existe para registro **velho** — de um teste antigo, de outro dia — que é
-    // o caso em que a unidade pode ter morrido sem ninguém atualizar o arquivo.
-    const idade = estado.agendadoEm ? Date.now() - Date.parse(estado.agendadoEm) : Infinity;
-    if (idade < 12 * 60 * 60 * 1_000) {
-      log(`${data}: já agendado na unidade ${estado.unidadeId}`);
-      return { estado: "ja-agendado", data, unidadeId: estado.unidadeId };
-    }
     const anterior = await unidadeAindaVale(estado.unidadeId, cfg);
     if (anterior.vale) {
       log(`${data}: já agendado na unidade ${estado.unidadeId} (${anterior.motivo})`);
       return { estado: "ja-agendado", data, unidadeId: estado.unidadeId };
     }
-    log(`${data}: a unidade ${estado.unidadeId} do registro está ${anterior.motivo} — agendando de novo`);
+
+    /*
+     * A unidade do registro não está no ar. Duas histórias diferentes levam
+     * aqui, e elas pedem respostas opostas:
+     *
+     *  - registro velho apontando para unidade de teste já cancelada — o certo
+     *    é agendar de novo, senão o clima não vai ao ar e ninguém é avisado;
+     *  - alguém cancelou a unidade no portal de propósito — o certo é **não**
+     *    recriar, senão a automação briga com a pessoa uma vez por minuto.
+     *
+     * Como daqui não dá para saber qual das duas é, recria **uma vez** e para.
+     * Se a segunda unidade também morrer, foi decisão de gente, e o resultado
+     * fica visível como erro em vez de virar um moinho.
+     */
+    const recriacoes = estado.recriacoes ?? 0;
+    if (recriacoes >= 1) {
+      throw new AgendamentoError(
+        `a unidade ${estado.unidadeId} de ${data} está ${anterior.motivo} e já foi recriada uma vez — ` +
+          "se o cancelamento foi intencional, nada a fazer; se não, agende pelo portal",
+        data,
+      );
+    }
+    log(`${data}: a unidade ${estado.unidadeId} está ${anterior.motivo} — recriando (tentativa única)`);
+    estado.recriacoes = recriacoes + 1;
   }
 
   const janela = horas?.length ? ` · janela ${horas[0]}h–${horas[horas.length - 1] + 1}h` : "";

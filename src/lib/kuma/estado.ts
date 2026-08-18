@@ -32,6 +32,12 @@ export type EstadoDoDia = {
    * para a de milissegundos, e o cron de minuto nunca mais reincide.
    */
   criandoEm?: string;
+  /**
+   * Quantas vezes a unidade deste dia precisou ser recriada por estar fora do
+   * ar. Limitado a uma: mais que isso é a automação insistindo contra alguém
+   * que cancelou de propósito no portal.
+   */
+  recriacoes?: number;
 };
 
 /**
