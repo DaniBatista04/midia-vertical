@@ -239,7 +239,12 @@ async function processar(
       endDate: data,
       durationInSecond: estado.duracao,
       frequency: frequencia,
-      hours: horas,
+      // `hours` NÃO vai aqui de propósito, apesar de existir no contrato: o
+      // `inquireSufficientTargets` estoura com HTTP 400 e
+      // `UnsupportedOperationException` ao desserializar o campo — bug do lado
+      // deles, com cara de coleção imutável que o Jackson tenta preencher.
+      // Medido em 18/08/2026. A consulta então é do dia inteiro, que é a
+      // pergunta mais larga; a janela vale na criação da unidade.
     },
     cfg,
   );

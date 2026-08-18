@@ -164,6 +164,15 @@ Enquanto o clima não mandava `hours`, a unidade nascia sem faixa declarada e a
 distribuição das exibições ao longo do dia ficava por conta do Kuma. Agora dá
 para escolher, por `KUMA_CLIMA_JANELA` ou por chamada.
 
+**Só que no `inquireSufficientTargets` o campo está quebrado do lado deles.**
+Mandar `hours` na consulta de inventário devolve HTTP 400 com
+`JSON parse error: (was java.lang.UnsupportedOperationException) ... through
+reference chain: InventoryInquireRequest["hours"] -> java.util.Collections…` —
+cara de coleção imutável que o Jackson tenta preencher em vez de substituir. Não
+é o payload: o mesmo array vai bem no `createOrder`. Por isso a consulta de
+inventário é feita sem janela, do dia inteiro, e a faixa entra só na criação da
+unidade. Vale perguntar à Brato.
+
 ### Erros e limites que a documentação erra ou omite
 
 | Coisa | O que o PDF diz | O que a API faz |

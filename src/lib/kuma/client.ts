@@ -244,6 +244,11 @@ export type InventarioRequest = {
   durationInSecond: number;
   /** Exibições por dia por tela. Múltiplo de 300. */
   frequency: number;
+  /**
+   * Existe no contrato, mas **não use**: o gateway devolve HTTP 400 com
+   * `UnsupportedOperationException` ao desserializar este campo aqui — bug do
+   * lado deles, medido em 18/08/2026. No `createOrder` o mesmo campo funciona.
+   */
   hours?: Horas;
 };
 
