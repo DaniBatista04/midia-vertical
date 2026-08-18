@@ -175,6 +175,9 @@ export async function GET(req: NextRequest) {
     // `?grupo=` é ensaio: põe no ar um criativo já aprovado numa data e janela
     // escolhidas, sem tocar no registro do dia. Ver `OpcoesAgendamento.grupo`.
     grupo: params.get("grupo") ?? undefined,
+    // `?alvo=` só tem efeito junto de `simular=true` — medir a cidade antes de
+    // virar a chave, sem que uma URL decida onde a veiculação acontece.
+    alvo: params.get("alvo") ?? undefined,
     log: (m: string) => console.log(`[agendar/${origem}] ${m}`),
   };
 
