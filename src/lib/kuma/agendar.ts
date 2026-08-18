@@ -266,6 +266,17 @@ async function processar(
     log(`${data}: ENSAIO com o grupo ${grupoEnsaio} — o registro do dia não será alterado`);
   }
 
+  /**
+   * A unidade que este ciclo já concluiu estar fora do ar.
+   *
+   * Guardada porque a checagem logo antes de criar precisa distinguir "outra
+   * execução agendou enquanto eu trabalhava" de "o registro continua com a
+   * mesma unidade morta que eu vim substituir". Sem isso, a própria trava
+   * contra corrida impede a recriação e o ciclo vira um laço quente: consulta
+   * tudo de novo a cada minuto e nunca conclui nada.
+   */
+  let unidadeMorta: string | undefined;
+
   if (estado.unidadeId) {
     const anterior = await unidadeAindaVale(estado.unidadeId, cfg);
     if (anterior.vale) {
@@ -295,6 +306,7 @@ async function processar(
       );
     }
     log(`${data}: a unidade ${estado.unidadeId} está ${anterior.motivo} — recriando (tentativa única)`);
+    unidadeMorta = estado.unidadeId;
     estado.recriacoes = recriacoes + 1;
   }
 
@@ -349,7 +361,7 @@ async function processar(
     // Última leitura antes de criar, agora que inventário e auditoria já
     // custaram alguns segundos: outra chamada pode ter agendado nesse meio.
     const agora = await lerJson<EstadoDoDia>(caminho);
-    if (agora?.unidadeId) {
+    if (agora?.unidadeId && agora.unidadeId !== unidadeMorta) {
       log(`${data}: outra execução agendou na unidade ${agora.unidadeId} — nada a fazer`);
       return { estado: "ja-agendado", data, unidadeId: agora.unidadeId };
     }
