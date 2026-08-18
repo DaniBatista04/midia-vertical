@@ -12,9 +12,13 @@ on:
         description: "Data de veiculação (YYYY-MM-DD). Vazio = amanhã."
         required: false
       indice:
-        description: "Índice do material. Suba para 2 ao reenviar o mesmo dia."
+        # Sem padrão de propósito. Com `default: "1"` o GitHub preenchia "1"
+        # mesmo quando quem dispara manda vazio, e o script recebia `--indice=1`
+        # fixo — então o segundo envio do mesmo dia repetia os nomes de arquivo,
+        # que o Kuma reprova com 502 e feedback em branco, sem dizer o motivo.
+        # Vazio deixa o script decidir: ele sobe um quando já existe registro.
+        description: "Índice do material. Vazio = o script decide (sobe um a cada reenvio)."
         required: false
-        default: "1"
       modo:
         description: "dia ou semana"
         required: false
