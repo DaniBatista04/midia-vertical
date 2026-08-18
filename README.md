@@ -125,6 +125,11 @@ do próprio pacote, que o bundler reescreve) e o binário precisa entrar no
 
 ## Clima automático
 
+> O registro da investigação que produziu isto — o que foi medido contra a API, e
+> por que cada decisão é o que é — está em [`docs/clima-automatico.md`](docs/clima-automatico.md).
+> Vale ler antes de "simplificar" qualquer coisa aqui: quase toda escolha contraria
+> a documentação da Brato, por um motivo que foi medido.
+
 Duas fases, porque a API impõe uma: a estratégia só aceita grupo criativo
 **aprovado**, e a aprovação é manual no portal.
 
