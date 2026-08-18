@@ -108,6 +108,15 @@ export type OpcoesAgendamento = {
    * Não é caminho de produção: o dia a dia é o registro que a fase 1 deixa.
    */
   grupo?: string;
+  /**
+   * Alvo alternativo, no mesmo formato de `KUMA_CLIMA_PREDIOS`.
+   *
+   * Só é aceito em simulação — quem chama a rota não decide onde a veiculação
+   * de verdade acontece, isso é configuração do ambiente. Existe para medir
+   * antes de virar a chave: dá para perguntar "quantas telas a cidade inteira
+   * teria, e quantas com inventário?" sem alterar nada.
+   */
+  alvo?: string;
   log?: (mensagem: string) => void;
   cfg?: KumaConfig;
 };
@@ -207,14 +216,20 @@ async function inventarioEmLotes(
  * inventário de tela física, então "todas as telas da cidade" nunca é padrão —
  * quem quer a cidade escreve `CIDADE-INTEIRA` e assume a conta.
  */
-async function resolverTelas(cidade: string, log: (m: string) => void): Promise<string[]> {
+async function resolverTelas(
+  cidade: string,
+  log: (m: string) => void,
+  alvo?: string,
+): Promise<string[]> {
   const lista = (v: string | undefined) =>
     (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
-  const telas = lista(process.env.KUMA_CLIMA_TELAS);
-  if (telas.length) return telas;
+  if (!alvo) {
+    const telas = lista(process.env.KUMA_CLIMA_TELAS);
+    if (telas.length) return telas;
+  }
 
-  const configurado = lista(process.env.KUMA_CLIMA_PREDIOS);
+  const configurado = alvo ? lista(alvo) : lista(process.env.KUMA_CLIMA_PREDIOS);
   if (!configurado.length) {
     throw new Error("defina KUMA_CLIMA_TELAS ou KUMA_CLIMA_PREDIOS — o alvo do pedido não tem padrão");
   }
@@ -330,9 +345,10 @@ async function processar(
     log: (m: string) => void;
     horas?: number[];
     grupo?: string;
+    alvo?: string;
   },
 ): Promise<ResultadoAgendamento | null> {
-  const { cfg, log, cidade, frequencia, simular, horas, grupo: grupoEnsaio } = opts;
+  const { cfg, log, cidade, frequencia, simular, horas, alvo, grupo: grupoEnsaio } = opts;
   const caminho = caminhoEstado(data);
   const registro = await lerJson<EstadoDoDia>(caminho);
 
@@ -420,7 +436,7 @@ async function processar(
     );
   }
 
-  const telas = await resolverTelas(cidade, log);
+  const telas = await resolverTelas(cidade, log, simular ? alvo : undefined);
   const disponiveis = await inventarioEmLotes(
     {
       cityId: cidade,
@@ -556,6 +572,7 @@ export async function agendarClima(opts: OpcoesAgendamento = {}): Promise<Result
       simular,
       horas,
       grupo: opts.grupo,
+      alvo: opts.alvo,
     });
     if (r) return r;
   }
