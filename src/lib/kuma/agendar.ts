@@ -17,6 +17,7 @@ import {
   createOrder,
   createOrderStrategy,
   descreverAuditoria,
+  getBuildings,
   getCreativeGroup,
   getOrderDetail,
   getValidLocations,
@@ -24,6 +25,7 @@ import {
   kumaConfig,
   KumaError,
   renomearPlano,
+  type InventarioRequest,
   type KumaConfig,
 } from "./client";
 import { caminhoEstado, LEASE_SEGUNDOS, type EstadoDoDia } from "./estado";
@@ -162,8 +164,48 @@ function datasCandidatas(data?: string): string[] {
 }
 
 /**
+ * Palavra que libera a cidade inteira.
+ *
+ * Deliberadamente não é `*`: um asterisco solto numa variável de ambiente pode
+ * ser expandido pelo shell antes de chegar aqui, e o acidente teria como
+ * resultado travar inventário em toda a São Paulo. Aqui só passa quem escreveu
+ * isto por extenso.
+ */
+export const ALVO_CIDADE_INTEIRA = "CIDADE-INTEIRA";
+
+/** Quantos prédios por chamada ao resolver telas. */
+const PREDIOS_POR_LOTE = 100;
+
+/** Quantas telas por consulta de inventário. */
+const TELAS_POR_LOTE = 300;
+
+/**
+ * Consulta de inventário fatiada.
+ *
+ * Com o alvo no prédio da Focus Media são duas telas e isso é uma chamada só;
+ * com a cidade inteira são milhares de `locationId` num único corpo de
+ * requisição, que é onde gateway costuma recusar por tamanho. A resposta é a
+ * união das fatias — a pergunta é por tela, então fatiar não muda o resultado.
+ */
+async function inventarioEmLotes(
+  req: InventarioRequest,
+  cfg: KumaConfig,
+): Promise<string[]> {
+  if (req.targetIds.length <= TELAS_POR_LOTE) {
+    return inquireSufficientTargets(req, cfg);
+  }
+  const disponiveis: string[] = [];
+  for (let i = 0; i < req.targetIds.length; i += TELAS_POR_LOTE) {
+    const fatia = req.targetIds.slice(i, i + TELAS_POR_LOTE);
+    disponiveis.push(...(await inquireSufficientTargets({ ...req, targetIds: fatia }, cfg)));
+  }
+  return disponiveis;
+}
+
+/**
  * Resolve as telas alvo. Exige configuração explícita: uma unidade consome
- * inventário de tela física, então "todas as telas da cidade" nunca é padrão.
+ * inventário de tela física, então "todas as telas da cidade" nunca é padrão —
+ * quem quer a cidade escreve `CIDADE-INTEIRA` e assume a conta.
  */
 async function resolverTelas(cidade: string, log: (m: string) => void): Promise<string[]> {
   const lista = (v: string | undefined) =>
@@ -172,13 +214,28 @@ async function resolverTelas(cidade: string, log: (m: string) => void): Promise<
   const telas = lista(process.env.KUMA_CLIMA_TELAS);
   if (telas.length) return telas;
 
-  const predios = lista(process.env.KUMA_CLIMA_PREDIOS);
-  if (!predios.length) {
+  const configurado = lista(process.env.KUMA_CLIMA_PREDIOS);
+  if (!configurado.length) {
     throw new Error("defina KUMA_CLIMA_TELAS ou KUMA_CLIMA_PREDIOS — o alvo do pedido não tem padrão");
   }
-  const locais = await getValidLocations(cidade, predios);
+
+  let predios = configurado;
+  if (configurado.length === 1 && configurado[0] === ALVO_CIDADE_INTEIRA) {
+    const todos = await getBuildings(cidade);
+    predios = todos.map((p) => p.buildingId);
+    log(`cidade ${cidade} inteira: ${predios.length} prédio(s)`);
+  }
+
+  // Em lotes: com a cidade inteira são centenas de prédios, e mandar tudo numa
+  // requisição só é pedir para o gateway recusar por tamanho.
+  const locais: string[] = [];
+  for (let i = 0; i < predios.length; i += PREDIOS_POR_LOTE) {
+    const lote = predios.slice(i, i + PREDIOS_POR_LOTE);
+    const encontrados = await getValidLocations(cidade, lote);
+    locais.push(...encontrados.map((l) => l.locationId));
+  }
   log(`${predios.length} prédio(s) → ${locais.length} tela(s)`);
-  return locais.map((l) => l.locationId);
+  return locais;
 }
 
 /**
@@ -364,7 +421,7 @@ async function processar(
   }
 
   const telas = await resolverTelas(cidade, log);
-  const disponiveis = await inquireSufficientTargets(
+  const disponiveis = await inventarioEmLotes(
     {
       cityId: cidade,
       targetIds: telas,

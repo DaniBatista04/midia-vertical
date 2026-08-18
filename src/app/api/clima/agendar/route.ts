@@ -21,7 +21,7 @@ export const dynamic = "force-dynamic";
  * chamadas em sequência contra a API do Kuma, que responde devagar quando o
  * portal está em uso.
  */
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 /**
  * Fase 2 do clima, como rota — o que antes era um job do GitHub Actions.
