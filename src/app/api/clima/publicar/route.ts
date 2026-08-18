@@ -32,6 +32,16 @@ type Corpo = {
   data?: string;
   duracao?: number;
   modo?: "dia" | "semana";
+  /**
+   * Dispara o workflow em modo de ensaio: ele monta o payload e para, sem
+   * renderizar nem submeter nada ao Kuma.
+   *
+   * Serve para provar a ligação inteira — token, permissão de Actions, nome do
+   * workflow, formato das entradas — sem gastar vinte minutos de runner nem
+   * deixar grupo criativo para alguém aprovar. Não aparece na tela: é caminho
+   * de quem está verificando a instalação.
+   */
+  dryRun?: boolean;
 };
 
 export async function POST(req: NextRequest) {
@@ -98,6 +108,7 @@ export async function POST(req: NextRequest) {
           // reenvio repetir nome de arquivo, que o Kuma reprova com 502 e
           // feedback vazio.
           indice: "",
+          dry_run: corpo.dryRun ? "true" : "false",
         },
       }),
     },
@@ -112,12 +123,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  console.log(`[publicar] workflow disparado para ${data} · ${modo} · ${duracao}s`);
+  console.log(
+    `[publicar] workflow disparado para ${data} · ${modo} · ${duracao}s` +
+      (corpo.dryRun ? " · ensaio (não envia nada)" : ""),
+  );
   return Response.json({
     ok: true,
     data,
     modo,
     duracao,
+    dryRun: Boolean(corpo.dryRun),
     acompanhar: `https://github.com/${REPO}/actions/workflows/${WORKFLOW}`,
   });
 }
