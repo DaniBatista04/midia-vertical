@@ -1,0 +1,80 @@
+name: Clima diário
+
+# 02:00 UTC = 23h de Brasília. O horário importa: às 23h a HG Brasil já tem a
+# previsão fechada do dia seguinte, e o material fica pronto antes da rotina
+# do time no portal do KUMA.
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      data:
+        description: "Data de veiculação (YYYY-MM-DD). Vazio = amanhã."
+        required: false
+      indice:
+        description: "Índice do material. Suba para 2 ao reenviar o mesmo dia."
+        required: false
+        default: "1"
+      modo:
+        description: "dia ou semana"
+        required: false
+        default: "dia"
+      duracao:
+        description: "Duração em segundos"
+        required: false
+        default: "10"
+      dry_run:
+        description: "Só mostrar o payload, sem renderizar nem enviar"
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  clima:
+    runs-on: ubuntu-latest
+    # Renderizar 250 frames em dois formatos e converter para H.265 leva
+    # minutos; o teto existe para o job não ficar preso se o painel travar.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Os ícones de umidade, chuva e vento do card são emoji. Sem esta fonte
+      # eles saem como quadrado vazio no Chromium do runner.
+      - name: Fonte de emoji
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-color-emoji
+
+      - name: Localizar o Chrome
+        run: |
+          if [ -x /usr/bin/google-chrome ]; then
+            echo "CHROME_PATH=/usr/bin/google-chrome" >> "$GITHUB_ENV"
+          elif [ -x /usr/bin/chromium-browser ]; then
+            echo "CHROME_PATH=/usr/bin/chromium-browser" >> "$GITHUB_ENV"
+          else
+            echo "Nenhum Chrome no runner" >&2
+            exit 1
+          fi
+
+      - name: Gerar e enviar o clima
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          KUMA_API_URL: ${{ secrets.KUMA_API_URL }}
+          KUMA_API_KEY: ${{ secrets.KUMA_API_KEY }}
+          KUMA_BIDDER_WEATHER: ${{ secrets.KUMA_BIDDER_WEATHER }}
+        run: |
+          args=""
+          [ -n "${{ inputs.data }}" ]    && args="$args --data=${{ inputs.data }}"
+          [ -n "${{ inputs.indice }}" ]  && args="$args --indice=${{ inputs.indice }}"
+          [ -n "${{ inputs.modo }}" ]    && args="$args --modo=${{ inputs.modo }}"
+          [ -n "${{ inputs.duracao }}" ] && args="$args --duracao=${{ inputs.duracao }}"
+          [ "${{ inputs.dry_run }}" = "true" ] && args="$args --dry-run"
+          npm run clima:diario -- $args

@@ -56,12 +56,22 @@ export async function transcodeToHevc(mp4: Blob): Promise<Blob> {
   return await res.blob();
 }
 
-/** Escolhe o melhor codec suportado, testando na maior resolução. */
-export async function pickCodec(): Promise<CodecChoice> {
+/**
+ * Escolhe o melhor codec suportado, testando na maior resolução.
+ *
+ * `familia` força H.264 ou H.265 em vez de pegar o melhor disponível. O job
+ * diário usa isso para entregar sempre o mesmo formato, independente de a
+ * máquina ter encoder HEVC — a auditoria do Kuma reprovou nosso H.265 e aceita
+ * o H.264, que é o formato com que a integração do Mural roda em produção.
+ */
+export async function pickCodec(familia?: "hevc" | "avc"): Promise<CodecChoice> {
   if (typeof VideoEncoder === "undefined") {
     throw new Error("WebCodecs não suportado — use Chrome/Edge 94+");
   }
-  for (const cand of CODEC_CANDIDATES) {
+  const candidatos = familia
+    ? CODEC_CANDIDATES.filter((c) => c.muxerCodec === familia)
+    : CODEC_CANDIDATES;
+  for (const cand of candidatos) {
     try {
       const sup = await VideoEncoder.isConfigSupported({
         codec: cand.codec,
@@ -83,6 +93,12 @@ export type EncodeOptions = {
   fmt: WeatherFormat;
   durationSeconds: number;
   codec: CodecChoice;
+  /**
+   * Sobrescreve o bitrate. Sem isso, H.264 sai a 12 Mbps por ser um
+   * intermediário que ainda vai ser reconvertido; quem entrega H.264 direto
+   * precisa dos 3 Mbps do spec.
+   */
+  bitrate?: number;
   onProgress?: (pct: number, frame: number, total: number) => void;
   shouldCancel?: () => boolean;
 };
@@ -93,6 +109,7 @@ export async function encodeScene({
   fmt,
   durationSeconds,
   codec,
+  bitrate,
   onProgress,
   shouldCancel,
 }: EncodeOptions): Promise<Blob | null> {
@@ -129,7 +146,7 @@ export async function encodeScene({
     codec: codec.codec,
     width: fmt.w,
     height: fmt.h,
-    bitrate: codec.muxerCodec === "hevc" ? BITRATE : INTERMEDIATE_BITRATE,
+    bitrate: bitrate ?? (codec.muxerCodec === "hevc" ? BITRATE : INTERMEDIATE_BITRATE),
     framerate: FPS,
     bitrateMode: "variable",
     latencyMode: "quality",

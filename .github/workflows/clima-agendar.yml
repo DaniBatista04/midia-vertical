@@ -1,0 +1,56 @@
+name: Clima — agendar
+
+# Roda de meia em meia hora, da meia-noite ao meio-dia de Brasília. Não é
+# desperdício: a única coisa que falta para o clima ir ao ar é alguém aprovar o
+# criativo no portal, e ninguém sabe a que horas isso acontece. O job olha,
+# encontra pendente, e sai em silêncio — quando encontrar aprovado, cria a
+# unidade do dia e amarra o criativo.
+on:
+  schedule:
+    - cron: "*/30 3-15 * * *"
+  workflow_dispatch:
+    inputs:
+      data:
+        description: "Data de veiculação (YYYY-MM-DD). Vazio = amanhã."
+        required: false
+      simular:
+        description: "Checar tudo sem criar unidade nem amarrar"
+        type: boolean
+        required: false
+        default: false
+
+# Duas execuções ao mesmo tempo criariam duas unidades para o mesmo dia.
+concurrency:
+  group: clima-agendar
+  cancel-in-progress: false
+
+jobs:
+  agendar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Agendar o clima do dia
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          KUMA_API_URL: ${{ secrets.KUMA_API_URL }}
+          KUMA_API_KEY: ${{ secrets.KUMA_API_KEY }}
+          KUMA_BIDDER_WEATHER: ${{ secrets.KUMA_BIDDER_WEATHER }}
+          # Alvo do pedido: prédios ou telas, sem padrão de propósito.
+          KUMA_CLIMA_PREDIOS: ${{ secrets.KUMA_CLIMA_PREDIOS }}
+          KUMA_CLIMA_TELAS: ${{ secrets.KUMA_CLIMA_TELAS }}
+          KUMA_CLIMA_FREQUENCIA: ${{ vars.KUMA_CLIMA_FREQUENCIA }}
+        run: |
+          args=""
+          [ -n "${{ inputs.data }}" ] && args="$args --data=${{ inputs.data }}"
+          [ "${{ inputs.simular }}" = "true" ] && args="$args --simular"
+          npm run clima:agendar -- $args
