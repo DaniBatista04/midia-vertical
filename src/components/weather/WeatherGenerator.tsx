@@ -16,6 +16,8 @@ import {
   buildDaySlots,
   fetchDay,
   fetchWeek,
+  primeiraDataPossivel,
+  quandoVoltaAFuncionar,
   sliceWeekFromDate,
   type DayPayload,
   type Unit,
@@ -70,6 +72,51 @@ export function WeatherGenerator() {
   const cancelRef = useRef(false);
 
   const [status, setStatus] = useState<ShellStatus>({ text: "Pronto" });
+
+  const [publicando, setPublicando] = useState(false);
+
+  /**
+   * Data que o disparo manual vai gerar, ou null quando nenhuma é possível.
+   *
+   * Sai da previsão que a tela já buscou, então a decisão é tomada com o dado
+   * real em vez de uma regra de horário que erraria — a janela de 24h da HG faz
+   * existir uma faixa do dia em que nem hoje nem amanhã fecham os oito
+   * horários do card.
+   */
+  const dataPublicavel = useMemo(
+    () => (dayPayload ? primeiraDataPossivel(dayPayload) : null),
+    [dayPayload],
+  );
+
+  /**
+   * Aciona o mesmo workflow que roda às 23h, com a data escolhida.
+   *
+   * O trabalho pesado não acontece aqui: render, ffmpeg e a folga de propagação
+   * ficam no runner, que é onde já estão provados. Daqui sai só o pedido.
+   */
+  const publicarNoKuma = useCallback(async () => {
+    if (!dataPublicavel) {
+      return toast(`Sem data possível agora — ${quandoVoltaAFuncionar()}.`, "err");
+    }
+    setPublicando(true);
+    try {
+      const r = await fetch("/api/clima/publicar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: dataPublicavel, duracao: duration, modo: "dia" }),
+      });
+      const corpo = (await r.json()) as { error?: string; acompanhar?: string };
+      if (!r.ok) throw new Error(corpo.error ?? `HTTP ${r.status}`);
+      toast(`✓ Disparado para ${dataPublicavel.split("-").reverse().join("/")}`, "ok");
+      setStatus({
+        text: `Clima de ${dataPublicavel} em geração — leva ~20 min até aparecer na Análise Criativa`,
+      });
+    } catch (e) {
+      toast(`Erro: ${e instanceof Error ? e.message : e}`, "err");
+    } finally {
+      setPublicando(false);
+    }
+  }, [dataPublicavel, duration, toast]);
 
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([null, null]);
   const rafRef = useRef<number | null>(null);
@@ -487,6 +534,24 @@ export function WeatherGenerator() {
           onClick={() => { cancelRef.current = true; }}>
           ⏹ Cancelar
         </button>
+
+        <div className="publicar-bloco">
+          <button className="btn btn-accent" disabled={publicando || !dayPayload}
+            onClick={() => void publicarNoKuma()}>
+            {publicando
+              ? <><span className="spinner" /> Disparando…</>
+              : "🚀 Enviar para o Kuma"}
+          </button>
+          <span className="publicar-nota">
+            {!dayPayload
+              ? "Busque a previsão do Dia para liberar o envio."
+              : dataPublicavel
+                ? `Gera e submete o clima de ${dataPublicavel.split("-").reverse().join("/")}. `
+                  + "A unidade é criada sozinha assim que você aprovar no portal."
+                : "Sem data possível agora — a previsão horária da HG não cobre nenhum dia "
+                  + `inteiro. Volta a funcionar ${quandoVoltaAFuncionar()}.`}
+          </span>
+        </div>
       </div>
     </>
   );

@@ -961,6 +961,26 @@ input[type="range"]::-moz-range-thumb {
   color: #c9a15e;
 }
 
+/*
+ * O envio para o Kuma fica separado das exportações por um traço: exportar
+ * baixa um arquivo na máquina de quem clicou, enviar coloca material na fila
+ * de aprovação que vai para as telas. Ações de peso diferente não devem
+ * encostar uma na outra.
+ */
+.publicar-bloco {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.publicar-nota {
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
 .notice-warn {
   font-size: 10.5px;
   line-height: 1.45;

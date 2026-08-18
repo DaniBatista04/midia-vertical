@@ -8,6 +8,43 @@ const DIAS_PT = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 /** Horários exibidos no modo Dia: de 2 em 2, das 08h às 22h. */
 export const TARGET_HOURS = [8, 10, 12, 14, 16, 18, 20, 22];
 
+/**
+ * Primeira data cujo card do dia sai inteiro com a previsão que a HG tem agora.
+ *
+ * A `hourly_forecast` é uma janela móvel de 24 horas a partir da hora corrente,
+ * e o card precisa dos oito horários de 08h a 22h. Isso significa que existe uma
+ * faixa do dia em que **nenhuma** data é possível: medido às 16h24, a janela ia
+ * das 17h de hoje às 16h de amanhã, cobrindo 4 dos 8 alvos de hoje e 6 dos 8 de
+ * amanhã. Na prática o card só fecha quando são mais de ~20h (aí amanhã fecha)
+ * ou menos de ~10h (aí hoje ainda fecha).
+ *
+ * Devolve `null` quando não há data possível — quem chama avisa em vez de gerar
+ * arte com "—" no lugar da temperatura, que é o que ninguém percebe até estar
+ * na tela do condomínio.
+ */
+export function primeiraDataPossivel(payload: DayPayload): string | null {
+  const hoje = new Date();
+  for (const offset of [0, 1]) {
+    const d = new Date(hoje);
+    d.setDate(d.getDate() + offset);
+    const iso = toLocalISODate(d);
+    if (buildDaySlots(payload, iso).every((s) => s.temp !== "—")) return iso;
+  }
+  return null;
+}
+
+/**
+ * Quando o card do dia volta a ser possível, em texto para quem opera.
+ *
+ * Não é conta exata — depende de a HG publicar as horas — mas dá a ordem certa
+ * de grandeza em vez de um "não deu" sem saída.
+ */
+export function quandoVoltaAFuncionar(agora = new Date()): string {
+  const h = agora.getHours();
+  if (h >= 10 && h < 20) return "a partir das 20h, para o card de amanhã";
+  return "agora — se falhou, a HG está sem as horas publicadas";
+}
+
 type HgResults = Record<string, unknown> & { city?: string };
 
 async function fetchHg(woeid: string, hourly: boolean): Promise<HgResults> {
