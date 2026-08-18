@@ -106,15 +106,30 @@ export async function apagar(caminho: string): Promise<boolean> {
     method: "DELETE",
     headers: { Authorization: `Bearer ${key}` },
   });
-  if (res.status === 404) return false;
+  // 400 e 404 são as duas formas de "não existe" que este Storage devolve — a
+  // leitura trata as duas assim há tempos, e apagar o que já não está lá não é
+  // erro.
+  if (res.status === 404 || res.status === 400) return false;
   if (!res.ok) throw new Error(`falha ao apagar ${caminho} (HTTP ${res.status})`);
   return true;
 }
 
 export async function lerJson<T>(caminho: string): Promise<T | null> {
   const { url, key, bucket } = supabaseConfig();
-  const res = await fetch(`${url}/storage/v1/object/${bucket}/${caminho}`, {
-    headers: { Authorization: `Bearer ${key}` },
+  /*
+   * O parâmetro descartável não é paranoia: medido em 18/08/2026, depois de
+   * apagar o registro do dia a leitura pelo endpoint autenticado continuou
+   * devolvendo o conteúdo antigo por cerca de um minuto, mesmo com
+   * `cache: "no-store"`. Alguma camada entre nós e o objeto guarda resposta.
+   *
+   * Um minuto de atraso importa porque o cron roda a cada minuto e a trava
+   * contra unidade duplicada depende desta leitura ser fresca: duas execuções
+   * lendo a mesma versão velha se acham as duas a primeira, e nascem duas
+   * unidades travando as mesmas telas. Já aconteceu por outro caminho.
+   */
+  const semCache = `?_=${Date.now()}`;
+  const res = await fetch(`${url}/storage/v1/object/${bucket}/${caminho}${semCache}`, {
+    headers: { Authorization: `Bearer ${key}`, "Cache-Control": "no-cache" },
     cache: "no-store",
   });
   if (res.status === 404 || res.status === 400) return null;
