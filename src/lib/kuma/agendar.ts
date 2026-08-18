@@ -82,6 +82,17 @@ export type OpcoesAgendamento = {
   frequencia?: number;
   /** Janela de veiculação em horas cheias. Ver `horasDaJanela`. */
   horas?: number[];
+  /**
+   * Agenda este grupo criativo em vez do que o registro do dia aponta.
+   *
+   * Existe para ensaio: permite pôr no ar, numa data e janela escolhidas, um
+   * criativo que já passou pela auditoria, sem depender de haver registro
+   * daquele dia. Continua valendo tudo o que protege o resto — o grupo precisa
+   * ser da conta Weather e estar **aprovado**, senão a chamada é recusada.
+   *
+   * Não é caminho de produção: o dia a dia é o registro que a fase 1 deixa.
+   */
+  grupo?: string;
   log?: (mensagem: string) => void;
   cfg?: KumaConfig;
 };
@@ -197,12 +208,33 @@ async function processar(
     cfg: KumaConfig;
     log: (m: string) => void;
     horas?: number[];
+    grupo?: string;
   },
 ): Promise<ResultadoAgendamento | null> {
-  const { cfg, log, cidade, frequencia, simular, horas } = opts;
+  const { cfg, log, cidade, frequencia, simular, horas, grupo } = opts;
   const caminho = caminhoEstado(data);
-  const estado = await lerJson<EstadoDoDia>(caminho);
+  const registro = await lerJson<EstadoDoDia>(caminho);
+
+  // Num ensaio com `grupo` explícito pode não existir registro daquele dia, e
+  // se existir ele não deve ser sobrescrito. Monta-se um registro de trabalho
+  // só para o resto do fluxo ter o que ler; `ensaio` corta a gravação no fim.
+  const ensaio = Boolean(grupo) && registro?.grupoId !== grupo;
+  const estado: EstadoDoDia | null = grupo
+    ? {
+        ...(registro ?? {
+          data,
+          nomeGrupo: "",
+          indice: 0,
+          duracao: 10,
+          submetidoEm: "",
+          materiais: [],
+        }),
+        grupoId: grupo,
+        unidadeId: undefined,
+      }
+    : registro;
   if (!estado) return null;
+  if (ensaio) log(`${data}: ENSAIO com o grupo ${grupo} — o registro do dia não será alterado`);
 
   if (estado.unidadeId) {
     const anterior = await unidadeAindaVale(estado.unidadeId, cfg);
@@ -292,18 +324,22 @@ async function processar(
   const travadas = detalhe.orderItems[0]?.reservedLocationIds?.length ?? 0;
   log(`unidade ${detalhe.orderStatus} · ${detalhe.startDate} → ${detalhe.endDate} · ${travadas} tela(s)`);
 
-  await uploadPublico({
-    caminho,
-    conteudo: Buffer.from(
-      JSON.stringify(
-        { ...estado, unidadeId, agendadoEm: new Date().toISOString(), telas: travadas },
-        null,
-        2,
+  if (ensaio) {
+    log("ensaio: registro do dia preservado — cancele a unidade no portal ao terminar");
+  } else {
+    await uploadPublico({
+      caminho,
+      conteudo: Buffer.from(
+        JSON.stringify(
+          { ...estado, unidadeId, agendadoEm: new Date().toISOString(), telas: travadas },
+          null,
+          2,
+        ),
       ),
-    ),
-    contentType: "application/json",
-  });
-  log("estado do dia atualizado");
+      contentType: "application/json",
+    });
+    log("estado do dia atualizado");
+  }
 
   return {
     estado: "agendado",
@@ -332,7 +368,15 @@ export async function agendarClima(opts: OpcoesAgendamento = {}): Promise<Result
 
   const datas = datasCandidatas(opts.data);
   for (const data of datas) {
-    const r = await processar(data, { cfg, log, cidade, frequencia, simular, horas });
+    const r = await processar(data, {
+      cfg,
+      log,
+      cidade,
+      frequencia,
+      simular,
+      horas,
+      grupo: opts.grupo,
+    });
     if (r) return r;
   }
   log(`nada a agendar em ${datas.join(" nem ")}`);
