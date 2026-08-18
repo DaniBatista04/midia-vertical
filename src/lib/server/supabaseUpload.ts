@@ -84,9 +84,19 @@ export function urlPublica(caminho: string): string {
  * Lê um JSON do bucket. Devolve `null` quando o arquivo não existe — é assim
  * que a fase de agendamento descobre que ainda não há clima submetido para o
  * dia, em vez de estourar.
+ *
+ * Vai pelo endpoint **autenticado**, e não pela URL pública, de propósito: a URL
+ * pública passa pelo CDN e serve versão velha por minutos. Medido: depois de
+ * gravar o registro com a unidade criada, a leitura pública ainda devolvia o
+ * registro sem unidade — o que fazia a fase de agendamento criar unidade
+ * duplicada a cada execução, travando inventário de novo e de novo.
  */
 export async function lerJson<T>(caminho: string): Promise<T | null> {
-  const res = await fetch(urlPublica(caminho), { cache: "no-store" });
+  const { url, key, bucket } = supabaseConfig();
+  const res = await fetch(`${url}/storage/v1/object/${bucket}/${caminho}`, {
+    headers: { Authorization: `Bearer ${key}` },
+    cache: "no-store",
+  });
   if (res.status === 404 || res.status === 400) return null;
   if (!res.ok) throw new Error(`falha ao ler ${caminho} (HTTP ${res.status})`);
   return (await res.json()) as T;

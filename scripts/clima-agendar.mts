@@ -47,12 +47,24 @@ function log(msg: string) {
   console.log(`[agendar] ${new Date().toISOString().slice(11, 19)} ${msg}`);
 }
 
-function dataAlvo(): string {
+const iso = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/**
+ * Datas candidatas, em ordem de urgência.
+ *
+ * A fase 1 roda às 23h e submete o clima do dia seguinte. Esta fase roda da
+ * meia-noite ao meio-dia, quando aquele "dia seguinte" já virou **hoje** — daí
+ * hoje vir primeiro. Amanhã entra depois para cobrir o caso de esta fase rodar
+ * antes da meia-noite, ou de um envio manual adiantado.
+ */
+function datasCandidatas(): string[] {
   const explicita = arg("data");
-  if (explicita) return explicita;
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  if (explicita) return [explicita];
+  const hoje = new Date();
+  const amanha = new Date();
+  amanha.setDate(amanha.getDate() + 1);
+  return [iso(hoje), iso(amanha)];
 }
 
 /**
@@ -72,28 +84,23 @@ async function resolverTelas(): Promise<string[]> {
   return locais.map((l) => l.locationId);
 }
 
-async function main() {
-  const cfg = kumaConfig();
-  const data = dataAlvo();
-  log(`clima de ${data} · cidade ${CIDADE} · ${FREQUENCIA} exibições/dia`);
-
+/** Devolve true quando agendou; false quando não havia nada a fazer nesta data. */
+async function processar(data: string, cfg: ReturnType<typeof kumaConfig>): Promise<boolean> {
   const caminho = caminhoEstado(data);
   const estado = await lerJson<EstadoDoDia>(caminho);
-  if (!estado) {
-    log(`nada submetido para ${data} (${caminho} não existe) — nada a agendar`);
-    return;
-  }
+  if (!estado) return false;
   if (estado.unidadeId) {
-    log(`já agendado: unidade ${estado.unidadeId} em ${estado.agendadoEm}`);
-    return;
+    log(`${data}: já agendado na unidade ${estado.unidadeId}`);
+    return false;
   }
+  log(`${data}: grupo ${estado.grupoId} · cidade ${CIDADE} · ${FREQUENCIA} exibições/dia`);
 
   const grupo = await getCreativeGroup(estado.grupoId, cfg);
-  log(`grupo ${estado.grupoId}: ${descreverAuditoria(grupo.audit.status)}`);
+  log(`auditoria: ${descreverAuditoria(grupo.audit.status)}`);
 
   if (grupo.audit.status === 1) {
     log("aguardando a aprovação no portal — o próximo ciclo tenta de novo");
-    return;
+    return false;
   }
   if (grupo.audit.status !== 3) {
     throw new Error(
@@ -118,7 +125,7 @@ async function main() {
 
   if (SIMULAR) {
     log(`simulação: criaria unidade para ${data} em ${disponiveis.length} tela(s) e amarraria ${estado.grupoId}`);
-    return;
+    return true;
   }
 
   const unidadeId = await createOrder({
@@ -161,6 +168,16 @@ async function main() {
     contentType: "application/json",
   });
   log("estado do dia atualizado");
+  return true;
+}
+
+async function main() {
+  const cfg = kumaConfig();
+  const datas = datasCandidatas();
+  for (const data of datas) {
+    if (await processar(data, cfg)) return;
+  }
+  log(`nada a agendar em ${datas.join(" nem ")}`);
 }
 
 main().catch((e) => {

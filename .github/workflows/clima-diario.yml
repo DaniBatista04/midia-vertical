@@ -63,6 +63,10 @@ jobs:
 
       - name: Gerar e enviar o clima
         env:
+          # O runner é UTC. Sem isto, "amanhã" às 02:00 UTC vira D+2 em vez do
+          # D+1 que são 23h de Brasília — e o card sai de um dia cuja previsão
+          # horária ainda não existe.
+          TZ: America/Sao_Paulo
           APP_URL: ${{ secrets.APP_URL }}
           APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
