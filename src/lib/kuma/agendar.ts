@@ -181,6 +181,42 @@ async function resolverTelas(cidade: string, log: (m: string) => void): Promise<
   return locais.map((l) => l.locationId);
 }
 
+/**
+ * Dá ao plano o nome pelo qual quem opera vai procurá-lo: a data de veiculação.
+ *
+ * O Kuma exige nome de plano **único** na conta — repetir devolve `errorCode -5`
+ * com "The campaign name is duplicated". No dia a dia existe um plano por data e
+ * isso nunca aparece; aparece quando o dia teve mais de um (uma recriação, um
+ * ensaio), e aí o segundo ganha sufixo em vez de ficar sem nome.
+ *
+ * Nada aqui derruba o agendamento: a veiculação já está de pé quando esta função
+ * roda, e nome se conserta no portal.
+ */
+async function nomearPlano(
+  planoId: string,
+  data: string,
+  cfg: KumaConfig,
+  log: (m: string) => void,
+): Promise<void> {
+  const base = nomeDoPlano(data);
+  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    const nome = tentativa === 1 ? base : `${base} (${tentativa})`;
+    try {
+      await renomearPlano(planoId, nome, cfg);
+      log(`plano renomeado para "${nome}"`);
+      return;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (!/duplicated/i.test(msg)) {
+        log(`não consegui renomear o plano para "${nome}": ${msg}`);
+        return;
+      }
+      log(`"${nome}" já existe — tentando o próximo`);
+    }
+  }
+  log(`plano ${planoId} ficou sem nome: "${base}" e os sufixos já estão em uso`);
+}
+
 /** Grava o registro do dia. Campo `undefined` some do JSON, que é o desejado. */
 async function gravarEstado(caminho: string, estado: EstadoDoDia): Promise<void> {
   await uploadPublico({
@@ -409,13 +445,7 @@ async function processar(
   // O plano nasce sem nome útil, e quem opera precisa achá-lo na lista pela
   // data em que aquilo vai ao ar. Falhar aqui não derruba o agendamento: a
   // veiculação já está de pé, e nome errado se conserta no portal.
-  const nome = nomeDoPlano(data);
-  try {
-    await renomearPlano(unidadeId, nome, cfg);
-    log(`plano renomeado para "${nome}"`);
-  } catch (e) {
-    log(`não consegui renomear o plano para "${nome}": ${e instanceof Error ? e.message : String(e)}`);
-  }
+  await nomearPlano(unidadeId, data, cfg, log);
 
   const detalhe = await getOrderDetail(unidadeId, cfg);
   const travadas = detalhe.orderItems[0]?.reservedLocationIds?.length ?? 0;
