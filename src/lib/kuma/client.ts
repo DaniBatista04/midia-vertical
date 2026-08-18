@@ -369,6 +369,44 @@ export type Localizacao = {
   locationDesc: string;
 };
 
+export type Predio = { buildingId: string; buildingName: string };
+
+/**
+ * Todos os prédios de uma cidade, paginando até o fim.
+ *
+ * A rota é paginada (`pageNo`/`pageSize`) e devolve `totalPage`, então quem
+ * quiser a cidade inteira precisa percorrer. O teto de páginas existe para um
+ * `totalPage` absurdo — ou um laço que não termina — não virar milhares de
+ * chamadas sem ninguém olhando.
+ */
+export async function getBuildings(
+  cityId: string,
+  cfg: KumaConfig = kumaConfig(),
+  pageSize = 200,
+  maxPaginas = 100,
+): Promise<Predio[]> {
+  const predios: Predio[] = [];
+  for (let pageNo = 1; pageNo <= maxPaginas; pageNo++) {
+    const body = await call<Record<string, unknown>>(cfg, "POST", "/v1/adresource/getBuildingInfos", {
+      cityId,
+      productName: KUMA_PRODUCT,
+      pageNo,
+      pageSize,
+    });
+    const dados = (body.data ?? body) as Record<string, unknown>;
+    const lista = ((dados.result ?? []) as Record<string, unknown>[]) ?? [];
+    for (const p of lista) {
+      predios.push({
+        buildingId: String(p.buildingId),
+        buildingName: String(p.buildingName ?? ""),
+      });
+    }
+    const totalPage = Number(dados.totalPage ?? 1);
+    if (!lista.length || pageNo >= totalPage) break;
+  }
+  return predios;
+}
+
 /** Telas de um ou mais prédios. `targetIds` são `buildingId`. */
 export async function getValidLocations(
   cityId: string,
