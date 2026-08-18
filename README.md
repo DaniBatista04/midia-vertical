@@ -137,14 +137,33 @@ Duas fases, porque a API impõe uma: a estratégia só aceita grupo criativo
 grupo criativo na conta Weather. O time encontra ele pronto na Análise Criativa
 e aprova no lote que já faz.
 
-**De 30 em 30 minutos — `clima-agendar`.** Procura o grupo do dia; enquanto
-estiver pendente, sai em silêncio. Quando encontra aprovado, checa inventário,
-cria a unidade daquele dia e amarra o criativo. Se o amarramento falhar, cancela
-a unidade em vez de deixar inventário travado sem conteúdo.
+**De minuto em minuto, 0h–12h — `/api/clima/agendar`.** Procura o grupo do dia;
+enquanto estiver pendente, sai em silêncio. Quando encontra aprovado, checa
+inventário, cria a unidade daquele dia e amarra o criativo. Se o amarramento
+falhar, cancela a unidade em vez de deixar inventário travado sem conteúdo.
+
+A fase 2 é uma rota do painel, chamada pelo cron da Vercel — não um job de CI. A
+diferença é de quem opera: depois de aprovar o criativo no portal, a pessoa
+precisa da unidade **já criada** para terminar a configuração dela. Cron de 5
+minutos no GitHub Actions (o mínimo que ele oferece) deixava ela esperando de
+braços cruzados. A fase 2 é `fetch` puro, sem browser e sem ffmpeg, então roda
+como rota sem nada de especial — e cron de minuto corta a espera para ≤ 60s.
+
+E, para não esperar nem isso, existe um link com token: a pessoa aprova o lote e
+clica num favorito do navegador, sem sair do portal do Kuma. A resposta é uma
+página dizendo o número da unidade que acabou de nascer.
+
+```bash
+# o favorito que fica na barra de quem aprova
+https://conteudos.focusmedia.com.br/api/clima/agendar?t=$CLIMA_TOKEN
+```
 
 ```
 scripts/clima-diario.mts        fase 1: login → render → hospedagem → submissão
-scripts/clima-agendar.mts       fase 2: aprovado? → inventário → unidade → amarrar
+src/lib/kuma/agendar.ts         fase 2: aprovado? → inventário → unidade → amarrar
+src/app/api/clima/agendar/      a fase 2 como rota — cron, link e painel
+scripts/clima-agendar.mts       a mesma fase 2 pela linha de comando
+vercel.json                     o cron de minuto que chama a rota
 src/app/clima/auto/             rota headless, sem UI, que o runner dirige
 src/lib/kuma/client.ts          criativo, inventário, unidade e estratégia
 src/lib/kuma/weatherGroup.ts    montagem do payload e nomenclatura
@@ -152,8 +171,17 @@ src/lib/kuma/estado.ts          registro do dia, que liga as duas fases
 ```
 
 O registro do dia (`clima/estado/<data>.json`, no mesmo bucket dos vídeos)
-existe porque as duas fases rodam em execuções separadas de CI e o projeto não
-tem banco: é ele que diz à fase 2 qual grupo criativo é o do dia.
+existe porque as duas fases rodam em execuções separadas e o projeto não tem
+banco: é ele que diz à fase 2 qual grupo criativo é o do dia. Se ele apontar
+para uma unidade que já foi cancelada, a fase 2 agenda de novo — mas só quando a
+API responde de forma definitiva. Falha de rede ao consultar conta como "a
+unidade ainda vale", porque tratar dúvida como ausência criaria uma segunda
+unidade travando as mesmas telas.
+
+A data de veiculação é calculada em `America/Sao_Paulo` de forma explícita, com
+`Intl`, e não pelo fuso do host. O runtime da Vercel é UTC como o do GitHub, e
+não existe workflow onde fixar `TZ` — depois da meia-noite UTC o dia local já
+virou, e a fase procuraria o registro do dia errado.
 
 O alvo do pedido — `KUMA_CLIMA_PREDIOS` ou `KUMA_CLIMA_TELAS` — **não tem
 padrão**. Unidade criada consome inventário de tela física, e "todas as telas
@@ -180,6 +208,12 @@ npm run clima:diario -- --indice=2       # reenvia o mesmo dia (ver abaixo)
 | `KUMA_API_URL` | `https://openapi.api.brato.info` (sandbox: `…api.sandbox.brato.info`) |
 | `KUMA_API_KEY` | chave da API, no header `x-api-key` |
 | `KUMA_BIDDER_WEATHER` | conta Weather — ela já existe, não crie outra |
+| `KUMA_CLIMA_TELAS` ou `KUMA_CLIMA_PREDIOS` | alvo do pedido; sem padrão, de propósito |
+| `CRON_SECRET` | a Vercel manda no `Authorization` do cron; sem ela o cron toma 401 |
+| `CLIMA_TOKEN` | o `?t=` do favorito de quem aprova; sem ela esse caminho fica fechado |
+
+As três últimas, mais as do Kuma e do Supabase, precisam existir **no projeto da
+Vercel** — antes eram só secrets do GitHub, e a fase 2 não roda mais lá.
 
 O material fica em `clima/WEATHER-<data>-<tela>-<índice>-<duração>.mp4`. O
 prefixo separado existe para o clima poder ter retenção própria sem que uma

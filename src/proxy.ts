@@ -10,8 +10,22 @@ import { SESSION_COOKIE, verifySession } from "@/lib/server/session";
  * qualquer um assim que o app subisse.
  */
 
-/** Rotas que precisam responder sem sessão. */
-const PUBLIC_PATHS = new Set(["/login", "/api/login", "/api/logout", "/api/health"]);
+/**
+ * Rotas que precisam responder sem sessão.
+ *
+ * `/api/clima/agendar` está aqui porque quem a chama não tem cookie: o cron da
+ * Vercel manda `Authorization: Bearer`, e a pessoa que acabou de aprovar o
+ * criativo clica num favorito com token na URL, de dentro do portal do Kuma.
+ * Ela **não** fica aberta: a própria rota confere os três caminhos de
+ * autenticação e responde 401 sem nenhum deles.
+ */
+const PUBLIC_PATHS = new Set([
+  "/login",
+  "/api/login",
+  "/api/logout",
+  "/api/health",
+  "/api/clima/agendar",
+]);
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
