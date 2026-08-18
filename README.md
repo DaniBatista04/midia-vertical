@@ -183,6 +183,30 @@ A data de veiculação é calculada em `America/Sao_Paulo` de forma explícita, 
 não existe workflow onde fixar `TZ` — depois da meia-noite UTC o dia local já
 virou, e a fase procuraria o registro do dia errado.
 
+### Disparo manual pelo painel
+
+A aba Clima tem **Enviar para o Kuma**: aciona o mesmo workflow das 23h com a
+data que a previsão permite, para o operador não depender do cron quando algo
+falha (ou quando simplesmente quiser).
+
+Ele **não** chama a API do Kuma direto. Render em Chromium, re-embalagem com
+ffmpeg e a folga de dez minutos de propagação não cabem numa rota da Vercel — e
+reimplementar isso aqui seria uma segunda versão do pipeline para divergir da
+primeira. A rota `/api/clima/publicar` só faz `workflow_dispatch`.
+
+Ele também **não** cria a unidade: o criativo precisa estar aprovado para
+receber estratégia. Depois que alguém aprova no portal, o cron de minuto cria
+plano e unidade, amarra e nomeia — em até 60 segundos.
+
+**Qual data ele escolhe.** A `hourly_forecast` da HG é uma janela móvel de 24h e
+o card do dia precisa dos oito horários de 08h a 22h, então existe uma faixa em
+que *nenhuma* data fecha. Medido às 16h24: a janela ia das 17h de hoje às 16h de
+amanhã, cobrindo 4 dos 8 alvos de hoje e 6 dos 8 de amanhã. Na prática o botão
+funciona **das 20h às 10h** — à noite gera amanhã, de manhã gera hoje. Fora
+disso ele diz que não há data possível em vez de gerar arte com `—` na
+temperatura. A decisão sai de `primeiraDataPossivel()`, com a previsão que a
+tela já buscou, não de uma regra de relógio.
+
 ### Janela de veiculação
 
 As telas tocam comunicado em faixas de duas horas — 10h–12h, 12h–14h, e assim
@@ -223,6 +247,7 @@ npm run clima:diario -- --indice=2       # reenvia o mesmo dia (ver abaixo)
 | `KUMA_CLIMA_TELAS` ou `KUMA_CLIMA_PREDIOS` | alvo do pedido; sem padrão, de propósito |
 | `CRON_SECRET` | a Vercel manda no `Authorization` do cron; sem ela o cron toma 401 |
 | `CLIMA_TOKEN` | o `?t=` do favorito de quem aprova; sem ela esse caminho fica fechado |
+| `GITHUB_DISPATCH_TOKEN` | token com Actions read/write, para o botão do painel acionar o workflow |
 | `KUMA_CLIMA_JANELA` | janela de veiculação, ex.: `16-18`; sem ela o Kuma decide |
 
 As três últimas, mais as do Kuma e do Supabase, precisam existir **no projeto da
