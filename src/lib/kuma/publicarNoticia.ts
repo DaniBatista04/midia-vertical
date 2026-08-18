@@ -78,7 +78,20 @@ export async function avancarNoticia(
   estado: EstadoNoticia,
   opts: { cfg?: KumaConfig; baseUrl: string; log?: (m: string) => void } = { baseUrl: "" },
 ): Promise<PassoNoticia> {
-  const cfg = opts.cfg ?? kumaConfig(process.env.KUMA_BIDDER_NEWS);
+  /*
+   * A conta é conferida aqui, e não deixada para o `kumaConfig` resolver: sem
+   * `KUMA_BIDDER_NEWS` ele cairia no padrão, que é a conta do clima, e a
+   * notícia seria submetida na Weather sem ninguém perceber — o tipo de erro
+   * que só aparece semanas depois, quando alguém estranha a lista da conta
+   * errada. Faltar configuração precisa doer na primeira execução.
+   */
+  const conta = process.env.KUMA_BIDDER_NEWS?.trim();
+  if (!conta) {
+    throw new Error(
+      "KUMA_BIDDER_NEWS não configurada — sem ela a notícia iria para a conta do clima.",
+    );
+  }
+  const cfg = opts.cfg ?? kumaConfig(conta);
   const log = opts.log ?? (() => {});
   const id = estado.id;
 
