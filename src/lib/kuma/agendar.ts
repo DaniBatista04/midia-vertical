@@ -35,10 +35,20 @@ import { lerJson, uploadPublico } from "../server/supabaseUpload";
 export const CIDADE_PADRAO = "6003";
 
 /**
- * Exibições por dia por tela. Múltiplo de 300, e 600 não é chute: medido em
- * amostra de 116 telas, 600/dia cabe em 100% delas, 1800 em 95% e 3600 em 23%.
+ * Exibições por dia por tela.
+ *
+ * 240 é a escolha da operação, e vale sempre — não é derivada de medição nossa.
+ * O que já foi medido, em amostra de 116 telas, é o teto: 600/dia cabia em 100%
+ * delas, 1800 em 95% e 3600 em 23%. Como 240 é menor que 600, o inventário é
+ * folgado por construção.
+ *
+ * Uma ressalva que vale lembrar ao mexer aqui: a documentação da Brato diz que
+ * `frequency` precisa ser múltiplo de **300**, e 240 não é. Na prática o
+ * inventário aceita (o contrato só exige mínimo 180) e a criação da unidade
+ * também — mas se um dia voltar `errorCode -5` numa chamada de pedido, é por
+ * aqui que se começa a procurar.
  */
-export const FREQUENCIA_PADRAO = 600;
+export const FREQUENCIA_PADRAO = 240;
 
 /**
  * A data de veiculação é sempre em horário de Brasília, calculada de forma

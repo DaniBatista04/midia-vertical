@@ -201,7 +201,13 @@ Medido em amostra de 116 telas, para a semana seguinte:
 | 2400 /dia | 86% |
 | 3600 /dia | 23% |
 
-Daí os 600/dia do clima. E daí também os 1.468 erros `-8` do publicador: ele pede
+O clima roda a **240/dia**, por decisão da operação — abaixo de todos os patamares
+medidos acima, então o inventário é folgado por construção. Vale registrar que 240
+**não é múltiplo de 300**, contrariando a documentação da Brato; o inventário
+aceita (o contrato só exige mínimo 180) e a criação da unidade também. Se um dia
+aparecer `errorCode -5` num pedido, é por aqui que se começa a procurar.
+
+E daí também os 1.468 erros `-8` do publicador: ele pede
 2400 para acordo 2x1 e 3600 para 1x1.
 
 ### Nunca repetir criação em 5xx
