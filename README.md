@@ -219,8 +219,25 @@ chamada com `?janela=16-18` no link ou `--janela=16-18` no CLI. Sem nada disso o
 campo não vai no pedido e a decisão fica com o Kuma, que é como o clima
 funcionou até esta janela existir.
 
+### Alvo
+
 O alvo do pedido — `KUMA_CLIMA_PREDIOS` ou `KUMA_CLIMA_TELAS` — **não tem
-padrão**. Unidade criada consome inventário de tela física, e "todas as telas
+padrão**. Para a cidade toda, `KUMA_CLIMA_PREDIOS=CIDADE-INTEIRA`: a automação
+pagina os prédios da cidade e expande as telas de cada um. Medido em São Paulo
+(`6003`): **1.160 prédios, 5.722 telas, 5.720 com inventário** a 600
+exibições/dia — 20 segundos para resolver tudo.
+
+A palavra é por extenso de propósito. `*` seria o óbvio e é exatamente o que um
+shell expande sem avisar; o acidente travaria inventário na cidade inteira.
+
+Para medir antes de mudar: `?alvo=CIDADE-INTEIRA&simular=true` no link responde
+quantas telas seriam, sem criar nada. `?alvo=` só vale junto de `simular` — quem
+chama a URL não decide onde a veiculação acontece.
+
+O antigo alvo do piloto era `2015236`, o prédio da própria Focus Media, com as
+telas `2015790` (25") e `2015791` (32").
+
+ Unidade criada consome inventário de tela física, e "todas as telas
 da cidade" nunca deve ser o que acontece por omissão.
 
 O runner abre `/clima/auto` em Chromium headless e chama `window.__clima.gerar()`.
@@ -248,6 +265,12 @@ npm run clima:diario -- --indice=2       # reenvia o mesmo dia (ver abaixo)
 | `CRON_SECRET` | a Vercel manda no `Authorization` do cron; sem ela o cron toma 401 |
 | `CLIMA_TOKEN` | o `?t=` do favorito de quem aprova; sem ela esse caminho fica fechado |
 | `GITHUB_DISPATCH_TOKEN` | token com Actions read/write, para o botão do painel acionar o workflow |
+
+Ferramentas de operação no mesmo link, para quando algo precisa de conserto à
+mão: `?renomear=<plano>&nome=<nome>` renomeia um plano, e `?limpar=<data>` apaga
+o registro daquele dia — a fase 2 volta a ver "nada a agendar" e a fase 1 grava
+um registro novo. Limpar **não** cancela unidade: se havia uma no ar, ela
+continua, e a resposta diz isso.
 | `KUMA_CLIMA_JANELA` | janela de veiculação, ex.: `16-18`; sem ela o Kuma decide |
 
 As três últimas, mais as do Kuma e do Supabase, precisam existir **no projeto da
