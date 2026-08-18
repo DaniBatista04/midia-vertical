@@ -14,10 +14,13 @@ O que este documento **não** tem: chaves. Elas vivem nos secrets do repositóri
 
 Automatizado, rodando por GitHub Actions:
 
-| Fase | Quando | O que faz |
-| --- | --- | --- |
-| `clima-diario` | 23h BRT | renderiza o card do dia seguinte, hospeda no Supabase, submete o grupo criativo |
-| `clima-agendar` | a cada 5 min, 0h–12h BRT | quando o criativo é aprovado, cria a unidade do dia e amarra o criativo |
+| Fase | Onde | Quando | O que faz |
+| --- | --- | --- | --- |
+| `clima-diario` | GitHub Actions | 23h BRT | renderiza o card do dia seguinte, hospeda no Supabase, submete o grupo criativo |
+| `/api/clima/agendar` | Vercel | a cada minuto, 0h–12h BRT | quando o criativo é aprovado, cria a unidade do dia e amarra o criativo |
+
+A fase 2 já morou no GitHub Actions e saiu de lá — o porquê está em
+"[A fase 2 saiu do CI](#a-fase-2-saiu-do-ci-porque-tem-gente-esperando)".
 
 Manual, por limite da API:
 
@@ -27,10 +30,49 @@ Manual, por limite da API:
 Provado em produção de ponta a ponta: grupo `101147_C20043026` aprovado (cinco
 materiais em 通过), unidade criada, criativo amarrado, unidade cancelada depois.
 
-Falta apenas o merge na `main` para os crons existirem — cron só vale na branch
-padrão.
+O cron da fase 1 vive na `main` — no GitHub Actions, cron só vale na branch
+padrão. O da fase 2 vive no `vercel.json` e passa a valer no deploy.
 
 ---
+
+## A fase 2 saiu do CI porque tem gente esperando
+
+O clima **não** passa pelo Mural. Diferente do resto, o processo dele é
+inteiramente dentro do portal do Kuma — não existe front nosso na jornada de
+quem opera, e a pessoa que aprova nunca abre o painel do `midia-vertical`.
+
+Isso importa porque, hoje e sem automação, depois de aprovar os grupos criativos
+ela vai até a unidade, amarra os criativos e termina outras configurações por
+lá. Quando a automação cria a unidade no lugar dela, ela **fica esperando a
+unidade existir** para poder continuar. Com o cron de 5 minutos do GitHub
+Actions — que é o intervalo mínimo que ele oferece — isso era até 5 minutos de
+pessoa parada, todo dia.
+
+Duas coisas destravaram a mudança:
+
+1. **A fase 2 não precisa de CI.** `src/lib/kuma/client.ts` e
+   `src/lib/server/supabaseUpload.ts` não importam nada: são `fetch` puro. Nada
+   de Playwright, nada de ffmpeg — isso é só da fase 1, que renderiza vídeo. A
+   fase 2 inteira cabe numa rota do painel.
+2. **A Vercel faz cron de minuto.** Espera máxima cai de 5 min para 60s, sem a
+   pessoa mudar nada no que faz.
+
+E para não esperar nem os 60 segundos, a rota aceita um token na URL. A pessoa
+está num navegador o tempo todo: um favorito na barra, clicado logo depois do
+"Confirmar" do lote, dispara o agendamento e devolve uma página com o número da
+unidade. É o mais perto de um webhook que dá para chegar — **a pessoa é o
+webhook**, já que o Kuma não tem nenhum.
+
+Que o Kuma não tem webhook não é suposição: `callback`, `webhook`, `notify`,
+`subscribe`, `push` e `hook` aparecem **zero** vezes no contrato inteiro do
+gateway (`openapi-brato-v2.json`, 42 rotas).
+
+Um detalhe de fuso veio junto. O runner do GitHub era UTC e a correção foi
+`TZ: America/Sao_Paulo` no workflow; o runtime da Vercel também é UTC e não tem
+workflow onde fixar isso. Por isso `dataEmSaoPaulo()` calcula com `Intl` e
+`timeZone: "America/Sao_Paulo"`, sem depender do fuso do host — verificado com
+o relógio em UTC, São Paulo, Tóquio e Los Angeles, e no caso que quebra de
+verdade (02:30 UTC, que são 23:30 do dia anterior em Brasília).
 
 ## O processo real do time, que define onde a automação para
 
@@ -190,14 +232,17 @@ O card que vai às telas é o **do dia** (hora a hora), não o da semana.
 
 ```
 scripts/clima-diario.mts        fase 1
-scripts/clima-agendar.mts       fase 2
+src/lib/kuma/agendar.ts         fase 2 — a lógica
+src/app/api/clima/agendar/      fase 2 — a rota (cron da Vercel, link, painel)
+scripts/clima-agendar.mts       fase 2 — a mesma coisa pela linha de comando
+vercel.json                     o cron de minuto
 src/app/clima/auto/             rota headless que o runner dirige
 src/components/weather/AutoRenderer.tsx
 src/lib/kuma/client.ts          criativo, inventário, unidade, estratégia, catálogo
 src/lib/kuma/weatherGroup.ts    payload, nomenclatura, tradução do feedback
 src/lib/kuma/estado.ts          registro do dia, que liga as duas fases
 src/lib/server/supabaseUpload.ts upload público + leitura autenticada
-.github/workflows/clima-*.yml   os dois crons
+.github/workflows/clima-diario.yml  o cron das 23h (precisa de Chromium e ffmpeg)
 docs/api-kuma/ROTAS.md          as 42 rotas
 docs/api-kuma/openapi-brato-v2.json
 ```
