@@ -147,6 +147,9 @@ export async function GET(req: NextRequest) {
     // `?janela=16-18` para veicular só naquela faixa; sem ela vale o padrão do
     // ambiente, e sem ambiente o Kuma decide.
     horas: horasDaJanela(params.get("janela") ?? undefined),
+    // `?grupo=` é ensaio: põe no ar um criativo já aprovado numa data e janela
+    // escolhidas, sem tocar no registro do dia. Ver `OpcoesAgendamento.grupo`.
+    grupo: params.get("grupo") ?? undefined,
     log: (m: string) => console.log(`[agendar/${origem}] ${m}`),
   };
 
