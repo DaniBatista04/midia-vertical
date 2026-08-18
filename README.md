@@ -123,22 +123,85 @@ precisa ficar em `serverExternalPackages` (ele acha o binário pelo `__dirname`
 do próprio pacote, que o bundler reescreve) e o binário precisa entrar no
 `outputFileTracingIncludes` para subir junto para a Vercel.
 
-## Automação (próxima fase)
+## Clima automático
 
-O plano é disparar o clima para o Kuma todo dia às 23h. Como o desenho e a
-codificação acontecem no browser, a automação precisa rodar a mesma página em
-Chromium headless no servidor — assim o vídeo automático e o preview do
-operador saem do mesmo código. `playwright-core` já está no projeto para isso;
-foi também o que validou os exports desta versão.
+Duas fases, porque a API impõe uma: a estratégia só aceita grupo criativo
+**aprovado**, e a aprovação é manual no portal.
 
-Dois pontos precisam de confirmação da matriz antes de valer a pena investir:
+**23h — `clima-diario`.** Renderiza o clima do dia seguinte, hospeda e submete o
+grupo criativo na conta Weather. O time encontra ele pronto na Análise Criativa
+e aprova no lote que já faz.
 
-1. **Prazo de quarta às 16h.** Os documentos dizem que `createOrderStrategy` e
-   `createTargetStrategy` têm o mesmo prazo do cancelamento. Se valer ao pé da
-   letra, troca diária de criativo não é permitida pela API.
-2. **SLA da auditoria.** O criativo nasce em `status = 1` e só toca em
-   `status = 3`. Submeter às 23h para veicular no dia seguinte só funciona se a
-   aprovação for rápida.
+**De 30 em 30 minutos — `clima-agendar`.** Procura o grupo do dia; enquanto
+estiver pendente, sai em silêncio. Quando encontra aprovado, checa inventário,
+cria a unidade daquele dia e amarra o criativo. Se o amarramento falhar, cancela
+a unidade em vez de deixar inventário travado sem conteúdo.
+
+```
+scripts/clima-diario.mts        fase 1: login → render → hospedagem → submissão
+scripts/clima-agendar.mts       fase 2: aprovado? → inventário → unidade → amarrar
+src/app/clima/auto/             rota headless, sem UI, que o runner dirige
+src/lib/kuma/client.ts          criativo, inventário, unidade e estratégia
+src/lib/kuma/weatherGroup.ts    montagem do payload e nomenclatura
+src/lib/kuma/estado.ts          registro do dia, que liga as duas fases
+```
+
+O registro do dia (`clima/estado/<data>.json`, no mesmo bucket dos vídeos)
+existe porque as duas fases rodam em execuções separadas de CI e o projeto não
+tem banco: é ele que diz à fase 2 qual grupo criativo é o do dia.
+
+O alvo do pedido — `KUMA_CLIMA_PREDIOS` ou `KUMA_CLIMA_TELAS` — **não tem
+padrão**. Unidade criada consome inventário de tela física, e "todas as telas
+da cidade" nunca deve ser o que acontece por omissão.
+
+O runner abre `/clima/auto` em Chromium headless e chama `window.__clima.gerar()`.
+Desenhar e codificar só acontece no browser, então a alternativa seria uma
+segunda implementação do desenho para o servidor — que divergiria da tela do
+operador na primeira mudança de layout. Aqui os dois saem do mesmo código.
+
+Para rodar à mão:
+
+```bash
+npm run clima:diario -- --dry-run        # mostra o payload, não envia
+npm run clima:diario -- --indice=2       # reenvia o mesmo dia (ver abaixo)
+```
+
+| Variável | Para quê |
+| --- | --- |
+| `APP_URL` | base pública do painel, de onde o runner renderiza |
+| `APP_PASSWORD` | senha do painel; o runner faz login como qualquer operador |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Storage onde os MP4 do dia viram URL pública — a mesma conta do Mural |
+| `SUPABASE_BUCKET` | opcional; padrão `Media`, com os arquivos sob `clima/` |
+| `KUMA_API_URL` | `https://openapi.api.brato.info` (sandbox: `…api.sandbox.brato.info`) |
+| `KUMA_API_KEY` | chave da API, no header `x-api-key` |
+| `KUMA_BIDDER_WEATHER` | conta Weather — ela já existe, não crie outra |
+
+O material fica em `clima/WEATHER-<data>-<tela>-<índice>-<duração>.mp4`. O
+prefixo separado existe para o clima poder ter retenção própria sem que uma
+limpeza dele encoste em criativo de comunicado — hoje nada é apagado, e são
+~9 MB por dia.
+
+### Nomenclatura
+
+`WEATHER-<AAAAMMDD>-<TELA>-<ÍNDICE>-<DURAÇÃO>`, com os mesmos cinco materiais
+que a auditoria já aprova hoje: `25`, `32`, `55`, `19` e `19P`. O índice
+precisa ser **o mesmo entre os formatos** — exigência da Brato para o sistema
+deles casar o vídeo 1 do 25" com o vídeo 1 do 32".
+
+O índice também é a saída para reenvio: nome de arquivo repetido entre
+requisições é reprovado com `502` e **feedback vazio**, sem dizer o motivo
+(medido no sandbox). Reenviou o mesmo dia? Suba para `--indice=2`.
+
+### O que a API não faz
+
+O tipo de unidade — obrigatória × reserva preemptível — não tem campo em chamada
+nenhuma; a Brato confirmou em agosto de 2026 que só se escolhe pelo portal. A
+unidade que a fase 2 cria é a comum, que trava inventário. Foi medido: a 600
+exibições/dia o inventário comporta em 100% de uma amostra de 116 telas, a 1800
+em 95% e a 3600 em 23% — daí o padrão de 600.
+
+Também não existe endpoint para **listar** pedidos: só `getOrderDetail` por id.
+Por isso a fase 2 guarda o id da unidade que ela mesma criou no registro do dia.
 
 Uma nota de ambiente: o container do headless precisa de uma fonte de emoji
 (Noto Color Emoji). Os ícones de umidade, chuva e vento do card de clima são
