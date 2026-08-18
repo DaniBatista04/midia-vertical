@@ -198,6 +198,57 @@ export function NewsGenerator() {
     saveBlob(blob, kumaFilename(slugify(item.title), fmt.w, fmt.h, "jpg"));
   };
 
+  /**
+   * Manda a notícia selecionada para a esteira do Kuma.
+   *
+   * Renderiza os dois formatos aqui mesmo — é o mesmo `renderJpeg` do download,
+   * então o que vai para as telas é exatamente o que está no preview — e sobe
+   * pelo corpo da requisição. Cabe porque notícia é imagem: o spec do Kuma
+   * limita JPG a 2 MB, e por isso nada disso precisa de runner de CI.
+   *
+   * A rota só hospeda e registra. Submeter vem depois, pelo cron, por causa da
+   * folga de propagação de dez minutos — ninguém fica de tela aberta esperando.
+   */
+  const enviarParaKuma = async () => {
+    if (!selected) return toast("Selecione uma notícia.", "err");
+    setBusy(true);
+    setStatus({ text: "Gerando e enviando…" });
+    try {
+      const base64 = async (fmtIndex: number) => {
+        const blob = await renderJpeg(selected, NEWS_FORMATS[fmtIndex], fmtIndex, controls);
+        const buf = await blob.arrayBuffer();
+        let bin = "";
+        const bytes = new Uint8Array(buf);
+        // Em pedaços: `String.fromCharCode(...bytes)` de uma vez estoura a pilha
+        // com arquivo grande.
+        for (let i = 0; i < bytes.length; i += 8192) {
+          bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
+        }
+        return btoa(bin);
+      };
+
+      const r = await fetch("/api/noticias/publicar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          titulo: selected.title,
+          duracao: 10,
+          imagem32: await base64(0),
+          imagem25: await base64(1),
+        }),
+      });
+      const corpo = (await r.json()) as { error?: string; id?: string; mensagem?: string };
+      if (!r.ok) throw new Error(corpo.error ?? `HTTP ${r.status}`);
+      toast(`✓ Enviado — ${corpo.id}`, "ok");
+      setStatus({ text: corpo.mensagem ?? "Enviado", ok: true });
+    } catch (e) {
+      toast(`Erro: ${e instanceof Error ? e.message : e}`, "err");
+      setStatus({ text: "Erro no envio", err: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const downloadSingle = async (fmtIndex: number) => {
     if (!selected) return;
     setBusy(true);
@@ -334,6 +385,19 @@ export function NewsGenerator() {
         <button className="btn btn-accent" onClick={downloadAll} disabled={!queue.size || busy}>
           Baixar fila (2 formatos)
         </button>
+
+        <div className="publicar-bloco">
+          <button className="btn btn-accent" onClick={() => void enviarParaKuma()}
+            disabled={!selected || busy}>
+            🚀 Enviar para o Kuma
+          </button>
+          <span className="publicar-nota">
+            {selected
+              ? "Envia a notícia selecionada. Ela aparece na Análise Criativa em ~10 min; "
+                + "depois que você aprovar, a unidade é criada sozinha."
+              : "Selecione uma notícia para liberar o envio."}
+          </span>
+        </div>
       </div>
     </>
   );

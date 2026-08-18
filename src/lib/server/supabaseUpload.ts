@@ -92,6 +92,36 @@ export function urlPublica(caminho: string): string {
  * duplicada a cada execução, travando inventário de novo e de novo.
  */
 /**
+ * Lista os objetos sob um prefixo.
+ *
+ * O projeto não tem banco, então o prefixo dos registros é a fila de trabalho:
+ * é assim que o cron descobre quais envios de notícia existem e em que ponto
+ * cada um parou. Devolve só os nomes, já com o prefixo na frente, porque é isso
+ * que `lerJson` espera receber.
+ */
+export async function listar(prefixo: string, limite = 200): Promise<string[]> {
+  const { url, key, bucket } = supabaseConfig();
+  const res = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+    },
+    body: JSON.stringify({ prefix: prefixo, limit: limite, sortBy: { column: "name", order: "asc" } }),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`falha ao listar ${prefixo} (HTTP ${res.status})`);
+  const itens = (await res.json()) as { name?: string }[];
+  return itens
+    .map((i) => i.name)
+    .filter((n): n is string => Boolean(n))
+    // A listagem devolve também as "pastas", que vêm sem extensão.
+    .filter((n) => n.endsWith(".json"))
+    .map((n) => `${prefixo}/${n}`);
+}
+
+/**
  * Apaga um objeto do bucket.
  *
  * Existe para o registro do dia: quando ele aponta para um estado que não vale
