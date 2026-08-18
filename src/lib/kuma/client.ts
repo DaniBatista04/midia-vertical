@@ -392,6 +392,22 @@ export async function getValidLocations(
   }));
 }
 
+/**
+ * Renomeia o plano.
+ *
+ * O `createOrder` não recebe nome, então o plano nasce com o rótulo que o Kuma
+ * escolher — e quem opera precisa achá-lo na lista pela data de veiculação. O
+ * `campaign/modify` (修改计划) aceita `adCampaignName`, e o id do plano é o
+ * mesmo que o `createOrder` devolve: os dois vivem no espaço `{referId}_{n}`.
+ */
+export async function renomearPlano(
+  adCampaignId: string,
+  adCampaignName: string,
+  cfg: KumaConfig = kumaConfig(),
+): Promise<void> {
+  await call(cfg, "POST", "/v1/adgroup/campaign/modify", { adCampaignId, adCampaignName });
+}
+
 /** Cancela a unidade. Sujeito ao prazo de operação e à trava de publicação. */
 export async function cancelOrder(orderId: string, cfg: KumaConfig = kumaConfig()): Promise<void> {
   await call(cfg, "POST", "/v1/adgroup/cancelOrder", { bidderId: cfg.bidderId, orderId });
