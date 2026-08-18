@@ -42,11 +42,11 @@ export const CIDADE_PADRAO = "6003";
  * delas, 1800 em 95% e 3600 em 23%. Como 240 é menor que 600, o inventário é
  * folgado por construção.
  *
- * Uma ressalva que vale lembrar ao mexer aqui: a documentação da Brato diz que
- * `frequency` precisa ser múltiplo de **300**, e 240 não é. Na prática o
- * inventário aceita (o contrato só exige mínimo 180) e a criação da unidade
- * também — mas se um dia voltar `errorCode -5` numa chamada de pedido, é por
- * aqui que se começa a procurar.
+ * A documentação da Brato diz que `frequency` precisa ser múltiplo de **300**, e
+ * 240 não é — mas isso não é cobrado. Medido no sandbox: dois `createOrder`
+ * seguidos nas mesmas telas, com 300 e com 240, criaram unidade os dois, com
+ * `errorCode: 0`. A regra do PDF vale para o inventário, cujo contrato exige
+ * mínimo 180.
  */
 export const FREQUENCIA_PADRAO = 240;
 

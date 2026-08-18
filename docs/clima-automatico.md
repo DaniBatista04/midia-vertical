@@ -178,7 +178,7 @@ unidade. Vale perguntar à Brato.
 | Coisa | O que o PDF diz | O que a API faz |
 | --- | --- | --- |
 | `durationInSecond` | múltiplo de 15 | múltiplo de **5**, mínimo **10** (12s recusado) |
-| `frequency` | múltiplo de 300 | confirmado |
+| `frequency` | múltiplo de 300 | **não é cobrado no `createOrder`** (ver abaixo) |
 | Parâmetro inválido | erro de negócio | **HTTP 200 com `errorCode` negativo** |
 | `-5` | "rede / interno / desconhecido" | também é erro de validação — nunca repetir |
 | Listagem de grupos | `auditStart`/`auditEnd` | exige `pageNo`/`pageSize` também |
@@ -200,6 +200,12 @@ Medido em amostra de 116 telas, para a semana seguinte:
 | 1800 /dia | 95% |
 | 2400 /dia | 86% |
 | 3600 /dia | 23% |
+
+**O múltiplo de 300 não é cobrado.** Medido no sandbox em 18/08/2026, com dois
+`createOrder` seguidos nas mesmas telas: `frequency: 300` criou a unidade
+`101151_10959` e `frequency: 240` criou a `101151_10960`, as duas com
+`errorCode: 0` (ambas canceladas em seguida). A regra do PDF vale para o
+inventário, cujo contrato exige mínimo 180, mas não bloqueia a criação de pedido.
 
 O clima roda a **240/dia**, por decisão da operação — abaixo de todos os patamares
 medidos acima, então o inventário é folgado por construção. Vale registrar que 240
@@ -289,10 +295,17 @@ vídeo 1 do 32".
 As contas de conteúdo próprio **já existem**, criadas pela equipe da Brato — não
 criar outras:
 
-| Conta | Para quê |
-| --- | --- |
-| Weather | o clima; é a que a automação usa |
-| News | as notícias |
+| Conta | reportId | Para quê |
+| --- | --- | --- |
+| Weather | 101147 | o clima |
+| News | 101149 | as notícias |
+
+**O `bidderId` não é o reportId.** Isso custa tempo se descoberto na hora errada:
+o id que aparece dentro de `orderId` e de grupo criativo (`101147_C20043055`) é o
+**reportId**, e usá-lo como `bidderId` devolve `ResourceNotFound`. O `bidderId` é
+o `accountId` — o hash de 32 caracteres que `POST /v1/authserver/account/list`
+devolve. Para achar a conta certa, esse endpoint aceita `referName` como filtro:
+`{"productName":"SMART_SCREEN","referName":"News"}`.
 
 Cidade de São Paulo é `6003`. O prédio da própria Focus Media é `2015236`, com as
 telas `2015790` (25") e `2015791` (32") — é o alvo do piloto, e o lugar certo para
