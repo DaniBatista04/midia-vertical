@@ -4,6 +4,10 @@
     {
       "path": "/api/clima/agendar",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/noticias/agendar",
+      "schedule": "* * * * *"
     }
   ]
 }

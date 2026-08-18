@@ -70,6 +70,45 @@ docs/legacy/          os dois HTMLs originais e o proxy Node, como referência
 As duas telas são renderizadas só no cliente (`ssr: false`): dependem de
 canvas, WebCodecs e medição de fonte, que não existem no servidor.
 
+## Notícia no Kuma — só no braço
+
+A notícia segue a mesma esteira do clima, **sem geração automática**: quem
+escolhe a notícia é gente, então nada sai sozinho. O botão **Enviar para o
+Kuma**, na aba Notícias, cria o envio; o resto é automático a partir dali.
+
+```
+clique → JPGs hospedados no Storage
+       → (10 min de propagação) → grupo criativo submetido
+       → você aprova no portal
+       → unidade criada + criativo amarrado + plano nomeado
+```
+
+Aqui não existe GitHub Actions, e é uma vantagem de a notícia ser **imagem**: o
+spec do Kuma limita JPG a 2 MB, então os dois formatos sobem pelo corpo da
+requisição e o arquivo que vai às telas é exatamente o que estava no preview.
+Nada de Chromium, ffmpeg ou runner — o que o clima precisa porque é vídeo.
+
+**Uma unidade por notícia**, por escolha da operação: dá para cancelar ou trocar
+uma sem encostar nas outras do mesmo dia. O custo é inventário separado por
+notícia. Alvo e frequência são os mesmos do clima.
+
+```
+src/lib/kuma/newsGroup.ts        grupo criativo em JPG, cinco materiais
+src/lib/kuma/noticiaEstado.ts    registro por envio — a fila de trabalho
+src/lib/kuma/publicarNoticia.ts  a esteira, um passo por chamada
+src/app/api/noticias/publicar/   recebe os JPGs do painel
+src/app/api/noticias/agendar/    o cron que empurra os envios abertos
+```
+
+O registro do envio (`noticias/estado/<data>-<índice>.json`) é também a fila: o
+cron lista o prefixo e avança cada envio um passo por vez. Envio no ar ou parado
+sai da varredura. Reprovado grava o motivo e **para** — repetir a mesma falha a
+cada minuto não ajuda ninguém.
+
+| Variável | Para quê |
+| --- | --- |
+| `KUMA_BIDDER_NEWS` | conta News — ela já existe, não crie outra |
+
 ## Especificação de criativo do Kuma
 
 Do `docs/api-kuma/creative specification.xlsx`:

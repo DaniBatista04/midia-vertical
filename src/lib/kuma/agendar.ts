@@ -206,7 +206,7 @@ const TELAS_POR_LOTE = 300;
  * requisição, que é onde gateway costuma recusar por tamanho. A resposta é a
  * união das fatias — a pergunta é por tela, então fatiar não muda o resultado.
  */
-async function inventarioEmLotes(
+export async function inventarioEmLotes(
   req: InventarioRequest,
   cfg: KumaConfig,
 ): Promise<string[]> {
@@ -226,7 +226,7 @@ async function inventarioEmLotes(
  * inventário de tela física, então "todas as telas da cidade" nunca é padrão —
  * quem quer a cidade escreve `CIDADE-INTEIRA` e assume a conta.
  */
-async function resolverTelas(
+export async function resolverTelas(
   cidade: string,
   log: (m: string) => void,
   alvo?: string,
@@ -274,13 +274,14 @@ async function resolverTelas(
  * Nada aqui derruba o agendamento: a veiculação já está de pé quando esta função
  * roda, e nome se conserta no portal.
  */
-async function nomearPlano(
+export async function nomearPlano(
   planoId: string,
   data: string,
   cfg: KumaConfig,
   log: (m: string) => void,
+  nomeBase?: string,
 ): Promise<void> {
-  const base = nomeDoPlano(data);
+  const base = nomeBase ?? nomeDoPlano(data);
   for (let tentativa = 1; tentativa <= 3; tentativa++) {
     const nome = tentativa === 1 ? base : `${base} (${tentativa})`;
     try {

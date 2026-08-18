@@ -25,6 +25,7 @@ const PUBLIC_PATHS = new Set([
   "/api/logout",
   "/api/health",
   "/api/clima/agendar",
+  "/api/noticias/agendar",
 ]);
 
 export async function proxy(req: NextRequest) {

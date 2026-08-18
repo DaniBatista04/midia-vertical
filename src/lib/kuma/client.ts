@@ -74,16 +74,19 @@ export type KumaConfig = { baseUrl: string; apiKey: string; bidderId: string };
  * Lê a configuração do ambiente. Sem valor padrão de propósito: o repositório
  * é público, e chave commitada é chave vazada.
  */
-export function kumaConfig(): KumaConfig {
+export function kumaConfig(bidderId?: string): KumaConfig {
   const baseUrl = process.env.KUMA_API_URL ?? "";
   const apiKey = process.env.KUMA_API_KEY ?? "";
-  const bidderId = process.env.KUMA_BIDDER_WEATHER ?? "";
-  if (!baseUrl || !apiKey || !bidderId) {
+  // Cada linha de conteúdo tem a própria conta no Kuma — o clima na Weather, a
+  // notícia na News. As contas já existem, criadas pela equipe da Brato.
+  const conta = bidderId ?? process.env.KUMA_BIDDER_WEATHER ?? "";
+  if (!baseUrl || !apiKey || !conta) {
     throw new KumaError(
-      "Configuração do Kuma incompleta — defina KUMA_API_URL, KUMA_API_KEY e KUMA_BIDDER_WEATHER.",
+      "Configuração do Kuma incompleta — defina KUMA_API_URL, KUMA_API_KEY e a conta " +
+        "(KUMA_BIDDER_WEATHER para o clima, KUMA_BIDDER_NEWS para a notícia).",
     );
   }
-  return { baseUrl, apiKey, bidderId };
+  return { baseUrl, apiKey, bidderId: conta };
 }
 
 /** Aceita tanto `{ data: {...} }` quanto o objeto cru. */
