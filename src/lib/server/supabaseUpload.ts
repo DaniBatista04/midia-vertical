@@ -91,6 +91,26 @@ export function urlPublica(caminho: string): string {
  * registro sem unidade — o que fazia a fase de agendamento criar unidade
  * duplicada a cada execução, travando inventário de novo e de novo.
  */
+/**
+ * Apaga um objeto do bucket.
+ *
+ * Existe para o registro do dia: quando ele aponta para um estado que não vale
+ * mais — uma unidade de teste já cancelada, um dia que precisa ser refeito do
+ * zero — apagar devolve a data ao ponto de partida, e a fase 1 grava um registro
+ * novo na próxima execução. Apagar é mais seguro que remendar campo a campo,
+ * porque a fase 2 trata "sem registro" como "nada a fazer" e fica quieta.
+ */
+export async function apagar(caminho: string): Promise<boolean> {
+  const { url, key, bucket } = supabaseConfig();
+  const res = await fetch(`${url}/storage/v1/object/${bucket}/${caminho}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  if (res.status === 404) return false;
+  if (!res.ok) throw new Error(`falha ao apagar ${caminho} (HTTP ${res.status})`);
+  return true;
+}
+
 export async function lerJson<T>(caminho: string): Promise<T | null> {
   const { url, key, bucket } = supabaseConfig();
   const res = await fetch(`${url}/storage/v1/object/${bucket}/${caminho}`, {

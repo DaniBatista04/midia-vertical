@@ -12,6 +12,8 @@ import {
   type ResultadoAgendamento,
 } from "@/lib/kuma/agendar";
 import { renomearPlano } from "@/lib/kuma/client";
+import { caminhoEstado, type EstadoDoDia } from "@/lib/kuma/estado";
+import { apagar, lerJson } from "@/lib/server/supabaseUpload";
 import { SESSION_COOKIE, verifySession } from "@/lib/server/session";
 
 export const runtime = "nodejs";
@@ -164,6 +166,30 @@ export async function GET(req: NextRequest) {
         ? pagina("Falhou", msg, "O plano não foi renomeado.", "#dc2626", 500)
         : Response.json({ ok: false, error: msg }, { status: 500 });
     }
+  }
+
+  // Ferramenta de operação: devolver um dia ao ponto de partida. Some o
+  // registro, a fase 2 passa a ver "nada a agendar" e fica quieta, e a fase 1
+  // grava um registro novo na próxima execução. Não toca em unidade nenhuma —
+  // se havia uma no ar, ela continua no ar e precisa ser cancelada no portal.
+  const limpar = params.get("limpar");
+  if (limpar) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(limpar)) {
+      return Response.json({ error: "Data inválida — use YYYY-MM-DD." }, { status: 400 });
+    }
+    const caminho = caminhoEstado(limpar);
+    const anterior = await lerJson<EstadoDoDia>(caminho);
+    const existia = await apagar(caminho);
+    const msg = existia
+      ? `Registro de ${limpar} apagado` +
+        (anterior?.unidadeId
+          ? ` — ele apontava para a unidade ${anterior.unidadeId}, que NÃO foi cancelada.`
+          : ".")
+      : `Não havia registro para ${limpar}.`;
+    console.log(`[agendar/${origem}] ${msg}`);
+    return querHtml(req)
+      ? pagina("Registro limpo", msg, "", "#0284c7")
+      : Response.json({ ok: true, limpou: existia, data: limpar, mensagem: msg });
   }
 
   const opcoes = {
