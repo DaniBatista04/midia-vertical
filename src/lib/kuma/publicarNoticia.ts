@@ -25,6 +25,7 @@ import {
 } from "./client";
 import {
   CIDADE_PADRAO,
+  dataEmSaoPaulo,
   FREQUENCIA_PADRAO,
   inventarioEmLotes,
   nomeDoPlano,
@@ -153,13 +154,29 @@ export async function avancarNoticia(
     return { estado: "aguardando-aprovacao", id, grupoId: estado.grupoId, auditoria: "criação em andamento" };
   }
 
+  /*
+   * A data de veiculação é decidida **agora**, não no envio.
+   *
+   * A notícia não tem regra de horário: escolheu, mandou, vai ao ar. Mas entre
+   * o envio e a aprovação passam minutos ou horas, e uma aprovação que atravessa
+   * a meia-noite deixaria o pedido nascendo com a data de ontem — que o Kuma
+   * recusa por prazo. Como o que a operação quer é "no ar assim que aprovado",
+   * a data do envio serve para nomear o material, e a veiculação usa o dia
+   * corrente sempre que ele já passou daquele.
+   */
+  const dataVeiculacao =
+    estado.data < dataEmSaoPaulo(0) ? dataEmSaoPaulo(0) : estado.data;
+  if (dataVeiculacao !== estado.data) {
+    log(`${id}: envio é de ${estado.data} e já virou o dia — veicula em ${dataVeiculacao}`);
+  }
+
   const telas = await resolverTelas(cidade, log);
   const disponiveis = await inventarioEmLotes(
     {
       cityId: cidade,
       targetIds: telas,
-      startDate: estado.data,
-      endDate: estado.data,
+      startDate: dataVeiculacao,
+      endDate: dataVeiculacao,
       durationInSecond: estado.duracao,
       frequency: frequencia,
     },
@@ -167,7 +184,7 @@ export async function avancarNoticia(
   );
   log(`${id}: inventário ${disponiveis.length} de ${telas.length} tela(s)`);
   if (!disponiveis.length) {
-    const motivo = `nenhuma tela com inventário para ${estado.data} a ${frequencia} exibições/dia`;
+    const motivo = `nenhuma tela com inventário para ${dataVeiculacao} a ${frequencia} exibições/dia`;
     await gravar({ ...estado, erro: motivo });
     return { estado: "parado", id, motivo };
   }
@@ -179,8 +196,8 @@ export async function avancarNoticia(
       cityId: cidade,
       targetIds: disponiveis,
       goalLocationNum: disponiveis.length,
-      startDate: estado.data,
-      endDate: estado.data,
+      startDate: dataVeiculacao,
+      endDate: dataVeiculacao,
       durationInSecond: estado.duracao,
       frequency: frequencia,
     },
@@ -202,7 +219,13 @@ export async function avancarNoticia(
 
   // O nome do plano leva a data e o índice: com várias notícias no mesmo dia,
   // só a data não distingue uma da outra na lista do portal.
-  await nomearPlano(unidadeId, estado.data, cfg, log, `${nomeDoPlano(estado.data)} N${estado.indice}`);
+  await nomearPlano(
+    unidadeId,
+    dataVeiculacao,
+    cfg,
+    log,
+    `${nomeDoPlano(dataVeiculacao)} N${estado.indice}`,
+  );
 
   const detalhe = await getOrderDetail(unidadeId, cfg);
   const travadas = detalhe.orderItems[0]?.reservedLocationIds?.length ?? 0;
