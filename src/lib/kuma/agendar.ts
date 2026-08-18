@@ -211,15 +211,15 @@ async function processar(
     grupo?: string;
   },
 ): Promise<ResultadoAgendamento | null> {
-  const { cfg, log, cidade, frequencia, simular, horas, grupo } = opts;
+  const { cfg, log, cidade, frequencia, simular, horas, grupo: grupoEnsaio } = opts;
   const caminho = caminhoEstado(data);
   const registro = await lerJson<EstadoDoDia>(caminho);
 
   // Num ensaio com `grupo` explícito pode não existir registro daquele dia, e
   // se existir ele não deve ser sobrescrito. Monta-se um registro de trabalho
   // só para o resto do fluxo ter o que ler; `ensaio` corta a gravação no fim.
-  const ensaio = Boolean(grupo) && registro?.grupoId !== grupo;
-  const estado: EstadoDoDia | null = grupo
+  const ensaio = Boolean(grupoEnsaio) && registro?.grupoId !== grupoEnsaio;
+  const estado: EstadoDoDia | null = grupoEnsaio
     ? {
         ...(registro ?? {
           data,
@@ -229,12 +229,14 @@ async function processar(
           submetidoEm: "",
           materiais: [],
         }),
-        grupoId: grupo,
+        grupoId: grupoEnsaio,
         unidadeId: undefined,
       }
     : registro;
   if (!estado) return null;
-  if (ensaio) log(`${data}: ENSAIO com o grupo ${grupo} — o registro do dia não será alterado`);
+  if (ensaio) {
+    log(`${data}: ENSAIO com o grupo ${grupoEnsaio} — o registro do dia não será alterado`);
+  }
 
   if (estado.unidadeId) {
     const anterior = await unidadeAindaVale(estado.unidadeId, cfg);
