@@ -274,6 +274,13 @@ A rota não prende a escolha do agendador: qualquer coisa que saiba mandar
 `Authorization: Bearer $CRON_SECRET` num GET serve igual — n8n, cron-job.org, uma
 máquina com `curl`. Trocar não custa mais que apagar uma linha do `vercel.json`.
 
+O fluxo de n8n está em `docs/n8n/clima-23h.json`, pronto para importar. Ele faz o
+que o cron da Vercel não faz: espera 45 minutos, lê o resultado do run na API do
+GitHub e avisa quando não deu certo. **Os dois não podem conviver** — dois
+disparos geram dois grupos criativos para o mesmo dia, porque o script sobe o
+índice a cada reenvio, e alguém acaba aprovando os dois. Quem entrar com o n8n
+tira o bloco de `/api/clima/publicar` do `vercel.json`.
+
 ---
 
 ## A previsão horária da HG é uma janela móvel de 24h

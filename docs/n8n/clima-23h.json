@@ -1,0 +1,256 @@
+{
+  "name": "Clima 23h — dispara e confere",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 23 * * *"
+            }
+          ]
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000001",
+      "name": "23h de Brasilia",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-620, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "d1",
+              "name": "desde",
+              "value": "={{ $now.minus({ minutes: 2 }).toUTC().toFormat(\"yyyy-MM-dd'T'HH:mm:ss'Z'\") }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000002",
+      "name": "Marca o horario",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-400, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://conteudos.focusmedia.com.br/api/clima/publicar",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000003",
+      "name": "Dispara o clima",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-180, 300],
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "TROCAR",
+          "name": "Clima - CRON_SECRET"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "amount": 45,
+        "unit": "minutes"
+      },
+      "id": "a1000000-0000-4000-8000-000000000004",
+      "name": "Espera o run terminar",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [60, 200],
+      "webhookId": "b1000000-0000-4000-8000-000000000004"
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/DaniBatista04/midia-vertical/actions/workflows/clima-diario.yml/runs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "event",
+              "value": "workflow_dispatch"
+            },
+            {
+              "name": "per_page",
+              "value": "1"
+            },
+            {
+              "name": "created",
+              "value": "={{ '>=' + $('Marca o horario').item.json.desde }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "a1000000-0000-4000-8000-000000000005",
+      "name": "Busca o run",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 200],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "TROCAR",
+          "name": "GitHub - token do clima"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// O dispatch responder 200 so quer dizer que entrou na fila. O que\n// interessa e como o run terminou, 45 min depois — o job leva ~25 min e o\n// YAML corta em 40, entao a esta altura ele ja acabou de um jeito ou de outro.\nconst runs = $input.first().json.workflow_runs || [];\n\nif (!runs.length) {\n  return [{ json: {\n    ok: false,\n    motivo: 'O disparo foi aceito mas nenhum run apareceu no GitHub.',\n    url: 'https://github.com/DaniBatista04/midia-vertical/actions/workflows/clima-diario.yml',\n  } }];\n}\n\nconst run = runs[0];\nconst ok = run.status === 'completed' && run.conclusion === 'success';\n\nlet motivo = '';\nif (run.status !== 'completed') {\n  motivo = `O run ainda esta em \"${run.status}\" 45 min depois — passou do timeout de 40 min do job.`;\n} else if (!ok) {\n  motivo = `O run terminou em \"${run.conclusion}\".`;\n}\n\nreturn [{ json: { ok, motivo, url: run.html_url, run: run.id, criado: run.created_at } }];"
+      },
+      "id": "a1000000-0000-4000-8000-000000000006",
+      "name": "Avalia o resultado",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000007",
+      "name": "Deu certo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [720, 200]
+    },
+    {
+      "parameters": {},
+      "id": "a1000000-0000-4000-8000-000000000008",
+      "name": "Clima no ar",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [960, 100]
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ 'Clima das 23h NAO foi para as telas. ' + $json.motivo + ' Run: ' + $json.url }}"
+      },
+      "id": "a1000000-0000-4000-8000-000000000009",
+      "name": "Avisa: run falhou",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Clima das 23h: o disparo nem saiu — a rota /api/clima/publicar respondeu erro. Conferir CRON_SECRET e se o deploy esta no ar."
+      },
+      "id": "a1000000-0000-4000-8000-000000000010",
+      "name": "Avisa: disparo falhou",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [60, 440]
+    },
+    {
+      "parameters": {
+        "content": "## Antes de ativar\n\n**1. Tire o cron da Vercel.** Apague o bloco de `/api/clima/publicar` do `vercel.json` e faca deploy. Se os dois dispararem, nascem dois grupos criativos para o mesmo dia — o script sobe o indice a cada reenvio — e alguem vai aprovar os dois.\n\n**2. Fuso do workflow.** Settings > Timezone > `America/Sao_Paulo`. Sem isso o `0 23 * * *` vale no fuso da instancia.\n\n**3. Duas credenciais Header Auth:**\n- `Clima - CRON_SECRET` -> Name: `Authorization`, Value: `Bearer <CRON_SECRET>` (o mesmo da Vercel)\n- `GitHub - token do clima` -> Name: `Authorization`, Value: `Bearer <PAT com actions:read>`",
+        "height": 400,
+        "width": 420,
+        "color": 3
+      },
+      "id": "a1000000-0000-4000-8000-000000000011",
+      "name": "Leia primeiro",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-620, -180]
+    },
+    {
+      "parameters": {
+        "content": "## Onde plugar o alarme\n\nOs dois `Stop and Error` fazem a execucao aparecer como falha no n8n — o que ja dispara o Error Workflow, se voce tiver um.\n\nPara receber no Slack/Telegram/e-mail, ponha o no do canal **antes** de cada `Stop and Error`. A mensagem pronta esta em `{{ $json.motivo }}` e o link do run em `{{ $json.url }}`.\n\nO horario tem folga curta de proposito: a janela da HG vai de agora ate 24h a frente e o card precisa chegar as 22:00 do dia seguinte. Disparar mais cedo encurta a cobertura, nao aumenta.",
+        "height": 340,
+        "width": 400,
+        "color": 4
+      },
+      "id": "a1000000-0000-4000-8000-000000000012",
+      "name": "Sobre o alarme",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [880, -180]
+    }
+  ],
+  "connections": {
+    "23h de Brasilia": {
+      "main": [[{ "node": "Marca o horario", "type": "main", "index": 0 }]]
+    },
+    "Marca o horario": {
+      "main": [[{ "node": "Dispara o clima", "type": "main", "index": 0 }]]
+    },
+    "Dispara o clima": {
+      "main": [
+        [{ "node": "Espera o run terminar", "type": "main", "index": 0 }],
+        [{ "node": "Avisa: disparo falhou", "type": "main", "index": 0 }]
+      ]
+    },
+    "Espera o run terminar": {
+      "main": [[{ "node": "Busca o run", "type": "main", "index": 0 }]]
+    },
+    "Busca o run": {
+      "main": [[{ "node": "Avalia o resultado", "type": "main", "index": 0 }]]
+    },
+    "Avalia o resultado": {
+      "main": [[{ "node": "Deu certo?", "type": "main", "index": 0 }]]
+    },
+    "Deu certo?": {
+      "main": [
+        [{ "node": "Clima no ar", "type": "main", "index": 0 }],
+        [{ "node": "Avisa: run falhou", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/Sao_Paulo"
+  },
+  "pinData": {}
+}
