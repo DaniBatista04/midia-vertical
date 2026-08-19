@@ -28,11 +28,16 @@ export const dynamic = "force-dynamic";
  * 19/08/2026, com 2h10 de atraso e nenhum card no ar. Um agendador pontual
  * chamando `workflow_dispatch` mantém as 23h de pé.
  *
- * O `GET` é o gatilho automático e se autentica por `CRON_SECRET`, que a
- * Vercel injeta como `Authorization: Bearer` nos crons dela. Qualquer outro
- * agendador que saiba mandar esse cabeçalho serve igual — n8n, cron-job.org,
- * uma máquina qualquer com `curl`. A escolha do agendador não está presa nesta
- * rota.
+ * O `GET` é o gatilho automático e aceita dois segredos no `Authorization:
+ * Bearer`, porque são duas plateias diferentes:
+ *
+ *  - **`CRON_SECRET`** — o segredo que a própria Vercel injeta nos crons dela.
+ *    Ninguém digita: ela põe o cabeçalho sozinha quando a variável existe.
+ *  - **`CLIMA_DISPATCH_TOKEN`** — para agendador de fora, hoje o n8n. Existe
+ *    separado de propósito: `CRON_SECRET` também guarda `/api/clima/agendar`,
+ *    e é write-only na Vercel — ninguém consegue lê-lo de volta para configurar
+ *    outro sistema, nem revogá-lo só para o n8n sem derrubar o cron de minuto.
+ *    Este aqui se apaga sozinho, sem afetar mais nada.
  *
  * **O que ela não faz:** criar a unidade. O criativo precisa estar aprovado para
  * receber estratégia, e aprovar é manual no portal. Depois da aprovação, o cron
@@ -173,9 +178,12 @@ async function disparar(pedido: Pedido, origem: "cron" | "painel"): Promise<Resp
  */
 export async function GET(req: NextRequest) {
   const auth = req.headers.get("authorization") ?? "";
-  const autorizado =
-    auth.startsWith("Bearer ") && segredoConfere(auth.slice(7), process.env.CRON_SECRET);
-  if (!autorizado) {
+  const recebido = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  // Os dois são conferidos sempre, sem curto-circuito, para o tempo de resposta
+  // não contar qual deles bateu.
+  const daVercel = segredoConfere(recebido, process.env.CRON_SECRET);
+  const deFora = segredoConfere(recebido, process.env.CLIMA_DISPATCH_TOKEN);
+  if (!recebido || !(daVercel || deFora)) {
     return Response.json({ error: "Não autenticado" }, { status: 401 });
   }
 

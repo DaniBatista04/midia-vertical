@@ -274,12 +274,23 @@ A rota não prende a escolha do agendador: qualquer coisa que saiba mandar
 `Authorization: Bearer $CRON_SECRET` num GET serve igual — n8n, cron-job.org, uma
 máquina com `curl`. Trocar não custa mais que apagar uma linha do `vercel.json`.
 
-O fluxo de n8n está em `docs/n8n/clima-23h.json`, pronto para importar. Ele faz o
-que o cron da Vercel não faz: espera 45 minutos, lê o resultado do run na API do
-GitHub e avisa quando não deu certo. **Os dois não podem conviver** — dois
-disparos geram dois grupos criativos para o mesmo dia, porque o script sobe o
-índice a cada reenvio, e alguém acaba aprovando os dois. Quem entrar com o n8n
-tira o bloco de `/api/clima/publicar` do `vercel.json`.
+Quem dispara hoje é o **n8n** — o fluxo está em `docs/n8n/clima-23h.json`. Ele faz
+o que o cron da Vercel não fazia: espera 45 minutos, lê o resultado do run na API
+do GitHub e avisa quando não deu certo. O bloco de `/api/clima/publicar` saiu do
+`vercel.json` no mesmo movimento: os dois não podem conviver, porque dois
+disparos geram dois grupos criativos para o mesmo dia — o script sobe o índice a
+cada reenvio — e alguém acaba aprovando os dois.
+
+O n8n se autentica com `CLIMA_DISPATCH_TOKEN`, e não com `CRON_SECRET`, por dois
+motivos práticos. O `CRON_SECRET` é `Sensitive` na Vercel, ou seja **write-only**:
+nem quem administra o projeto consegue lê-lo de volta para configurar outro
+sistema — só rotacionar. E ele guarda também `/api/clima/agendar`, então revogar
+o acesso do n8n significaria derrubar junto o cron de minuto. Um token próprio se
+apaga sozinho.
+
+O nó que lê o run **não** precisa de credencial: o repositório é público e a API
+de runs do GitHub responde anônima (60 requisições por hora por IP, contra uma
+por dia deste fluxo).
 
 ---
 
