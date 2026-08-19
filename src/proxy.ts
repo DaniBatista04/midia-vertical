@@ -18,6 +18,10 @@ import { SESSION_COOKIE, verifySession } from "@/lib/server/session";
  * criativo clica num favorito com token na URL, de dentro do portal do Kuma.
  * Ela **não** fica aberta: a própria rota confere os três caminhos de
  * autenticação e responde 401 sem nenhum deles.
+ *
+ * `/api/clima/publicar` entrou pelo mesmo motivo, quando o cron das 23h saiu do
+ * `schedule:` do GitHub Actions e veio para cá. Também não fica aberta: o `GET`
+ * exige `CRON_SECRET` e o `POST` do painel confere a sessão por conta própria.
  */
 const PUBLIC_PATHS = new Set([
   "/login",
@@ -25,6 +29,7 @@ const PUBLIC_PATHS = new Set([
   "/api/logout",
   "/api/health",
   "/api/clima/agendar",
+  "/api/clima/publicar",
   "/api/noticias/agendar",
 ]);
 

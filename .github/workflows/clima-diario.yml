@@ -1,11 +1,15 @@
 name: Clima diário
 
-# 02:00 UTC = 23h de Brasília. O horário importa: às 23h a HG Brasil já tem a
-# previsão fechada do dia seguinte, e o material fica pronto antes da rotina
-# do time no portal do KUMA.
+# Só por disparo — o horário das 23h vive no cron da Vercel, em `vercel.json`,
+# que chama `/api/clima/publicar` e cai no `workflow_dispatch` daqui.
+#
+# O `schedule:` do GitHub morava aqui e foi removido: ele não é um horário, é
+# uma fila compartilhada. Em 19/08/2026 atrasou 2h10 e disparou 01h10 — e às
+# 01h a janela móvel de 24h da HG não alcança mais o fim do dia seguinte, então
+# o job recusou gerar e nenhum card foi para as telas. O horário importa: às
+# 23h a previsão do dia seguinte está fechada e o material fica pronto antes da
+# rotina do time no portal do KUMA.
 on:
-  schedule:
-    - cron: "0 2 * * *"
   workflow_dispatch:
     inputs:
       data:

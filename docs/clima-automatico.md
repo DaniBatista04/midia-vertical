@@ -16,7 +16,7 @@ Automatizado, rodando por GitHub Actions:
 
 | Fase | Onde | Quando | O que faz |
 | --- | --- | --- | --- |
-| `clima-diario` | GitHub Actions | 23h BRT | renderiza o card do dia seguinte, hospeda no Supabase, submete o grupo criativo |
+| `clima-diario` | GitHub Actions, disparado pelo cron da Vercel | 23h BRT | renderiza o card do dia seguinte, hospeda no Supabase, submete o grupo criativo |
 | `/api/clima/agendar` | Vercel | a cada minuto, 0h–12h BRT | quando o criativo é aprovado, cria a unidade do dia e amarra o criativo |
 
 A fase 2 já morou no GitHub Actions e saiu de lá — o porquê está em
@@ -30,8 +30,9 @@ Manual, por limite da API:
 Provado em produção de ponta a ponta: grupo `101147_C20043026` aprovado (cinco
 materiais em 通过), unidade criada, criativo amarrado, unidade cancelada depois.
 
-O cron da fase 1 vive na `main` — no GitHub Actions, cron só vale na branch
-padrão. O da fase 2 vive no `vercel.json` e passa a valer no deploy.
+Os dois horários vivem no `vercel.json` e passam a valer no deploy. O da fase 1
+chama `/api/clima/publicar`, que dispara o workflow — o porquê está em
+"[O cron das 23h saiu do GitHub Actions](#o-cron-das-23h-saiu-do-github-actions)".
 
 ---
 
@@ -247,6 +248,34 @@ falharia na trava todas as noites. Os dois workflows fixam `TZ: America/Sao_Paul
 
 ---
 
+## O cron das 23h saiu do GitHub Actions
+
+O `schedule:` do GitHub não é um horário, é uma fila compartilhada — ele dispara
+quando sobra runner, e o atraso não tem teto nem configuração que o encurte.
+
+Em 19/08/2026 a primeira execução agendada atrasou 2h10 e rodou 01h10. Às 01h a
+janela móvel da HG já não alcançava o fim do dia seguinte, o job recusou gerar
+(corretamente), e nenhum card foi para as telas — o time subiu uma imagem de
+backup à mão. Nada estava quebrado no pipeline: só o relógio.
+
+O horário passou para o cron da Vercel, que é o mesmo agendador que já roda a
+fase 2 de minuto em minuto e dispara na hora. Ele chama `/api/clima/publicar`,
+que faz um `workflow_dispatch` do mesmo workflow de sempre — o render continua no
+Actions, porque é lá que existem Chromium e ffmpeg. O `schedule:` foi removido do
+YAML para não haver dois gatilhos.
+
+Vale dizer o que **não** resolve: adiantar o horário. A janela da HG vai de agora
+até 24h à frente, e o card precisa chegar às 22:00 do dia seguinte — disparar
+mais cedo encurta a cobertura, não aumenta. Às 20h já faltariam as 22:00. As 23h
+são o ponto certo: uma hora de folga na janela e uma hora de margem até a
+virada do dia, que é quando "amanhã" viraria D+2.
+
+A rota não prende a escolha do agendador: qualquer coisa que saiba mandar
+`Authorization: Bearer $CRON_SECRET` num GET serve igual — n8n, cron-job.org, uma
+máquina com `curl`. Trocar não custa mais que apagar uma linha do `vercel.json`.
+
+---
+
 ## A previsão horária da HG é uma janela móvel de 24h
 
 O `hourly_forecast` começa na hora atual e cobre 24 horas. Rodando às 23h, cobre o
@@ -268,14 +297,15 @@ scripts/clima-diario.mts        fase 1
 src/lib/kuma/agendar.ts         fase 2 — a lógica
 src/app/api/clima/agendar/      fase 2 — a rota (cron da Vercel, link, painel)
 scripts/clima-agendar.mts       fase 2 — a mesma coisa pela linha de comando
-vercel.json                     o cron de minuto
+vercel.json                     os dois crons — o das 23h e o de minuto
 src/app/clima/auto/             rota headless que o runner dirige
 src/components/weather/AutoRenderer.tsx
 src/lib/kuma/client.ts          criativo, inventário, unidade, estratégia, catálogo
 src/lib/kuma/weatherGroup.ts    payload, nomenclatura, tradução do feedback
 src/lib/kuma/estado.ts          registro do dia, que liga as duas fases
 src/lib/server/supabaseUpload.ts upload público + leitura autenticada
-.github/workflows/clima-diario.yml  o cron das 23h (precisa de Chromium e ffmpeg)
+src/app/api/clima/publicar/     fase 1 — o gatilho (cron das 23h, painel)
+.github/workflows/clima-diario.yml  fase 1 — o runner (precisa de Chromium e ffmpeg)
 docs/api-kuma/ROTAS.md          as 42 rotas
 docs/api-kuma/openapi-brato-v2.json
 ```
