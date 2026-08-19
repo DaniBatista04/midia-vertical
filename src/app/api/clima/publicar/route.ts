@@ -188,7 +188,12 @@ export async function GET(req: NextRequest) {
   }
 
   return disparar(
-    { data: dataEmSaoPaulo(1), modo: "dia", duracao: 10, dryRun: false },
+    {
+      data: dataEmSaoPaulo(1),
+      modo: "dia",
+      duracao: 10,
+      dryRun: req.nextUrl.searchParams.get("ensaio") === "true",
+    },
     "cron",
   );
 }
