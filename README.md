@@ -108,6 +108,14 @@ cada minuto não ajuda ninguém.
 | Variável | Para quê |
 | --- | --- |
 | `KUMA_BIDDER_NEWS` | conta News — ela já existe, não crie outra |
+| `APP_URL` | base **pública** do painel, de onde o Kuma baixa os defaults do 19" |
+
+`APP_URL` não é enfeite. O cron da Vercel chama `/api/noticias/agendar` pela URL
+do deploy, que está sob Deployment Protection e responde 302 para o login da
+Vercel — o Kuma baixaria uma página de login em vez do JPG e reprovaria o grupo
+inteiro com 502, sem dizer qual material falhou. Sem a variável, e com a origem
+sendo `*.vercel.app`, a rota recusa em vez de submeter. É a mesma variável que o
+script do clima já usa; `ASSETS_URL` tem precedência, para ensaio local.
 
 ## Especificação de criativo do Kuma
 

@@ -47,6 +47,38 @@ async function autorizar(req: NextRequest): Promise<Origem | null> {
   return null;
 }
 
+/**
+ * Base pública de onde o Kuma baixa os materiais default do 19".
+ *
+ * **Não** pode ser a origem da requisição. O cron da Vercel chama esta rota pela
+ * URL do deploy (`*.vercel.app`), que está sob Deployment Protection: um GET nos
+ * assets responde 302 para `vercel.com/sso-api`. O Kuma baixa o material pela URL
+ * do `iurl`, então ele recebe uma página de login em vez de JPG — e a auditoria
+ * reprova o grupo inteiro com 502 e feedback vazio, sem dizer qual dos cinco
+ * materiais falhou. Foi o que aconteceu com o envio `2026-08-20-01`, o primeiro a
+ * atravessar o cron: os dois JPGs da notícia estavam certos, no Supabase, e o
+ * que o Kuma não conseguiu baixar foram os defaults do 19".
+ *
+ * O clima nunca caiu nisso porque roda por script, com `APP_URL`/`ASSETS_URL`
+ * apontando para o domínio público. Aqui as variáveis valem o mesmo. Sem elas, e
+ * com a origem sendo a URL do deploy, é melhor falhar: submeter material que
+ * ninguém consegue baixar queima o nome do grupo criativo, e o reenvio precisa de
+ * um índice novo.
+ */
+function basePublica(req: NextRequest): string {
+  const configurada = (process.env.ASSETS_URL ?? process.env.APP_URL ?? "").trim();
+  if (configurada) return configurada.replace(/\/+$/, "");
+
+  const daRequisicao = req.nextUrl.origin;
+  if (new URL(daRequisicao).hostname.endsWith(".vercel.app")) {
+    throw new Error(
+      "APP_URL não configurada — a URL do deploy é protegida e o Kuma não " +
+        'baixaria os materiais default do 19".',
+    );
+  }
+  return daRequisicao;
+}
+
 /** Envio que já está no ar ou parado não precisa de mais nenhuma volta. */
 function terminado(e: EstadoNoticia): boolean {
   return Boolean(e.unidadeId) || Boolean(e.erro);
@@ -57,7 +89,15 @@ export async function GET(req: NextRequest) {
   if (!origem) return Response.json({ error: "Não autenticado" }, { status: 401 });
 
   const log = (m: string) => console.log(`[noticia/${origem}] ${m}`);
-  const baseUrl = req.nextUrl.origin;
+
+  let baseUrl: string;
+  try {
+    baseUrl = basePublica(req);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[noticia/${origem}] ${msg}`);
+    return Response.json({ ok: false, error: msg }, { status: 500 });
+  }
 
   let caminhos: string[];
   try {
