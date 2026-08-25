@@ -8,8 +8,10 @@
  *
  *   hospedado → (folga de propagação) → submetido → (aprovação manual) → no ar
  *
- * Cada envio tem sua própria unidade, por escolha da operação: dá para cancelar
- * ou trocar uma notícia sem encostar nas outras do mesmo dia.
+ * Cada envio tem seu próprio grupo criativo — é o que passa pela Análise
+ * Criativa individualmente —, mas a **unidade é uma por dia**: todos os grupos
+ * do mesmo dia são amarrados nela, e a tela alterna entre eles. Ver
+ * `noticiaPlano.ts` para o porquê e para o limite que a frequência impõe.
  */
 
 import {
@@ -19,6 +21,7 @@ import {
   descreverAuditoria,
   getCreativeGroup,
   getOrderDetail,
+  KumaError,
   kumaConfig,
   submitCreativeGroup,
   type KumaConfig,
@@ -33,9 +36,15 @@ import {
   resolverTelas,
 } from "./agendar";
 import { montarGrupoNoticia } from "./newsGroup";
+import {
+  caminhoPlanoNoticias,
+  gruposEmSlots,
+  slotsDaFrequencia,
+  type PlanoNoticias,
+} from "./noticiaPlano";
 import { caminhoNoticia, type EstadoNoticia } from "./noticiaEstado";
 import { LEASE_SEGUNDOS } from "./estado";
-import { lerJson, uploadPublico } from "../server/supabaseUpload";
+import { apagar, lerJson, uploadPublico } from "../server/supabaseUpload";
 
 /**
  * Segundos entre hospedar o material e submeter o grupo criativo.
@@ -66,6 +75,237 @@ async function gravar(estado: EstadoNoticia): Promise<void> {
     conteudo: Buffer.from(JSON.stringify(estado, null, 2)),
     contentType: "application/json",
   });
+}
+
+async function gravarPlano(plano: PlanoNoticias): Promise<void> {
+  await uploadPublico({
+    caminho: caminhoPlanoNoticias(plano.data),
+    conteudo: Buffer.from(JSON.stringify(plano, null, 2)),
+    contentType: "application/json",
+  });
+}
+
+/** Onde a notícia foi amarrada, ou o motivo de ela não ter sido. */
+type Amarracao = { unidadeId: string; telas: number } | { motivo: string };
+
+/**
+ * Abre a unidade do dia e amarra nela a primeira notícia.
+ *
+ * É o caminho antigo, com uma diferença: o registro do plano é gravado **antes**
+ * do `createOrder`, ainda sem `unidadeId`. É essa reserva que faz a segunda
+ * notícia aprovada no mesmo minuto esperar, em vez de abrir a segunda unidade do
+ * dia travando as mesmas telas. Se a criação morrer no meio, o lease vence e a
+ * volta seguinte tenta de novo — o registro sem `unidadeId` não engana ninguém.
+ */
+async function abrirPlano(
+  estado: EstadoNoticia,
+  grupoId: string,
+  data: string,
+  opts: { cfg: KumaConfig; log: (m: string) => void; cidade: string; frequencia: number },
+): Promise<Amarracao> {
+  const { cfg, log, cidade, frequencia } = opts;
+  const id = estado.id;
+
+  const telas = await resolverTelas(cidade, log);
+  const disponiveis = await inventarioEmLotes(
+    {
+      cityId: cidade,
+      targetIds: telas,
+      startDate: data,
+      endDate: data,
+      durationInSecond: estado.duracao,
+      frequency: frequencia,
+    },
+    cfg,
+  );
+  log(`${id}: inventário ${disponiveis.length} de ${telas.length} tela(s)`);
+  if (!disponiveis.length) {
+    return { motivo: `nenhuma tela com inventário para ${data} a ${frequencia} exibições/dia` };
+  }
+
+  const agora = new Date().toISOString();
+  const reserva: PlanoNoticias = {
+    data,
+    duracao: estado.duracao,
+    frequencia,
+    grupos: [],
+    criadoEm: agora,
+    criandoEm: agora,
+  };
+  await gravarPlano(reserva);
+  await gravar({ ...estado, criandoEm: agora });
+
+  const unidadeId = await createOrder(
+    {
+      cityId: cidade,
+      targetIds: disponiveis,
+      goalLocationNum: disponiveis.length,
+      startDate: data,
+      endDate: data,
+      durationInSecond: estado.duracao,
+      frequency: frequencia,
+    },
+    cfg,
+  );
+  log(`${id}: unidade ${unidadeId} criada para ${data}`);
+
+  // Unidade sem criativo trava inventário e não exibe nada.
+  try {
+    await createOrderStrategy(unidadeId, gruposEmSlots([grupoId], frequencia), cfg);
+  } catch (e) {
+    log(`${id}: amarramento falhou — cancelando a unidade ${unidadeId}`);
+    await cancelOrder(unidadeId, cfg).catch((err) =>
+      console.error(`[noticia] cancelamento também falhou, cancele no portal: ${err}`),
+    );
+    // A reserva sai junto: sem unidade, o dia não tem plano nenhum.
+    await apagar(caminhoPlanoNoticias(data)).catch(() => {});
+    await gravar({ ...estado, criandoEm: undefined }).catch(() => {});
+    throw e;
+  }
+
+  const detalhe = await getOrderDetail(unidadeId, cfg);
+  const travadas = detalhe.orderItems[0]?.reservedLocationIds?.length ?? 0;
+  await gravarPlano({
+    ...reserva,
+    unidadeId,
+    grupos: [grupoId],
+    telas: travadas,
+    atualizadoEm: new Date().toISOString(),
+    criandoEm: undefined,
+  });
+
+  /*
+   * O nome não leva mais o índice da notícia. Ele estava ali porque cada envio
+   * tinha a sua unidade e só a data não distinguia uma da outra na lista do
+   * portal; agora a unidade é do dia e comporta as notícias todas.
+   */
+  await nomearPlano(unidadeId, data, cfg, log, `${nomeDoPlano(data)} NEWS`);
+
+  return { unidadeId, telas: travadas };
+}
+
+/**
+ * A unidade que o plano do dia aponta ainda serve?
+ *
+ * Mesma regra do clima (`unidadeAindaVale`, em `agendar.ts`): **"não sei" conta
+ * como "serve"**. Falha de rede ao consultar não é prova de que a unidade sumiu,
+ * e tratar dúvida como ausência abriria um segundo plano travando as mesmas
+ * telas. Só resposta definitiva derruba o registro — cancelada, encerrada, ou o
+ * `-10` de pedido inexistente, que é como unidade cancelada costuma aparecer.
+ *
+ * A mesma chamada devolve as telas travadas agora, que é o número honesto para
+ * gravar no envio: o do registro foi lido quando a unidade nasceu.
+ */
+async function unidadeDoPlano(
+  unidadeId: string,
+  cfg: KumaConfig,
+): Promise<{ serve: boolean; motivo: string; telas?: number }> {
+  try {
+    const detalhe = await getOrderDetail(unidadeId, cfg);
+    const morta = detalhe.orderStatus === "CANCELLED" || detalhe.orderStatus === "TERMINATED";
+    return {
+      serve: !morta,
+      motivo: detalhe.orderStatus.toLowerCase(),
+      telas: detalhe.orderItems[0]?.reservedLocationIds?.length,
+    };
+  } catch (e) {
+    const erro = e instanceof KumaError ? e : null;
+    const inexistente =
+      erro?.code === -10 || /not found/i.test(e instanceof Error ? e.message : "");
+    if (inexistente) return { serve: false, motivo: "inexistente" };
+    return { serve: true, motivo: `impossível confirmar (${e instanceof Error ? e.message : String(e)})` };
+  }
+}
+
+/**
+ * Amarra a notícia no plano que o dia já tem.
+ *
+ * `createOrderStrategy` **substitui** a estratégia inteira, então a chamada leva
+ * os grupos anteriores mais o novo — mandar só o novo tiraria as outras notícias
+ * do ar. Nenhuma tela é travada aqui: a unidade já reservou as dela quando
+ * nasceu, e é justamente isso que a mudança economiza — antes, quatro notícias
+ * eram quatro unidades pedindo 240 exibições/dia cada nas mesmas telas.
+ */
+async function entrarNoPlano(
+  estado: EstadoNoticia,
+  grupoId: string,
+  plano: PlanoNoticias & { unidadeId: string },
+  opts: { cfg: KumaConfig; log: (m: string) => void; frequencia: number },
+): Promise<Amarracao> {
+  const { cfg, log, frequencia } = opts;
+  const id = estado.id;
+  const slots = slotsDaFrequencia(frequencia);
+
+  // Reentrância: a estratégia já foi trocada numa volta anterior e o que faltou
+  // foi gravar o envio. Repetir a chamada não estragaria nada, mas nada mudaria.
+  if (plano.grupos.includes(grupoId)) {
+    log(`${id}: grupo ${grupoId} já estava no plano ${plano.unidadeId}`);
+    return { unidadeId: plano.unidadeId, telas: plano.telas ?? 0 };
+  }
+
+  if (plano.duracao !== estado.duracao) {
+    return {
+      motivo:
+        `plano de ${plano.data} veicula em ${plano.duracao}s e este envio é de ${estado.duracao}s — ` +
+        "a duração é da unidade, não da notícia",
+    };
+  }
+
+  if (plano.grupos.length >= slots) {
+    return {
+      motivo:
+        `plano de ${plano.data} já está com ${plano.grupos.length} notícia(s), o máximo que ` +
+        `${frequencia} exibições/dia comporta`,
+    };
+  }
+
+  /*
+   * A unidade do dia pode ter sido cancelada no portal entre uma notícia e a
+   * próxima. Se foi, o registro do plano sai e este envio para com o motivo à
+   * mostra: recriar sozinha a unidade que alguém cancelou é a automação
+   * discutindo com quem opera. Sem o registro, a próxima notícia do dia abre um
+   * plano novo — mas por conta de um envio novo, não por insistência.
+   */
+  const unidade = await unidadeDoPlano(plano.unidadeId, cfg);
+  if (!unidade.serve) {
+    await apagar(caminhoPlanoNoticias(plano.data)).catch(() => {});
+    return {
+      motivo: `plano de ${plano.data} está ${unidade.motivo} (unidade ${plano.unidadeId})`,
+    };
+  }
+  const telas = unidade.telas ?? plano.telas ?? 0;
+
+  const grupos = [...plano.grupos, grupoId];
+  const agora = new Date().toISOString();
+  await gravarPlano({ ...plano, criandoEm: agora });
+  await gravar({ ...estado, criandoEm: agora });
+
+  try {
+    await createOrderStrategy(plano.unidadeId, gruposEmSlots(grupos, frequencia), cfg);
+  } catch (e) {
+    /*
+     * Aqui a unidade **não** é cancelada, ao contrário do caminho que a cria:
+     * ela já tem as notícias anteriores no ar, e derrubá-la por causa de uma que
+     * não entrou tiraria as outras junto. A lista fica como estava e o cron
+     * tenta de novo no minuto seguinte.
+     */
+    await gravarPlano({ ...plano, criandoEm: undefined }).catch(() => {});
+    await gravar({ ...estado, criandoEm: undefined }).catch(() => {});
+    throw e;
+  }
+
+  await gravarPlano({
+    ...plano,
+    grupos,
+    telas,
+    atualizadoEm: new Date().toISOString(),
+    criandoEm: undefined,
+  });
+  log(
+    `${id}: entrou no plano ${plano.unidadeId} — ${grupos.length} notícia(s) em ${slots} slot(s)`,
+  );
+
+  return { unidadeId: plano.unidadeId, telas };
 }
 
 /**
@@ -145,7 +385,7 @@ export async function avancarNoticia(
     return { estado: "parado", id, motivo };
   }
 
-  /* ── 4. Criar a unidade e amarrar ─────────────────────────── */
+  /* ── 4. Entrar no plano do dia ────────────────────────────── */
   const cidade = process.env.KUMA_CLIMA_CIDADE ?? CIDADE_PADRAO;
   const frequencia = Number(process.env.KUMA_CLIMA_FREQUENCIA ?? FREQUENCIA_PADRAO);
 
@@ -163,6 +403,9 @@ export async function avancarNoticia(
    * recusa por prazo. Como o que a operação quer é "no ar assim que aprovado",
    * a data do envio serve para nomear o material, e a veiculação usa o dia
    * corrente sempre que ele já passou daquele.
+   *
+   * É também a data que escolhe o plano: quem atravessa a meia-noite entra no
+   * plano do dia novo, junto com as notícias de hoje, e não no de ontem.
    */
   const dataVeiculacao =
     estado.data < dataEmSaoPaulo(0) ? dataEmSaoPaulo(0) : estado.data;
@@ -170,75 +413,53 @@ export async function avancarNoticia(
     log(`${id}: envio é de ${estado.data} e já virou o dia — veicula em ${dataVeiculacao}`);
   }
 
-  const telas = await resolverTelas(cidade, log);
-  const disponiveis = await inventarioEmLotes(
-    {
-      cityId: cidade,
-      targetIds: telas,
-      startDate: dataVeiculacao,
-      endDate: dataVeiculacao,
-      durationInSecond: estado.duracao,
-      frequency: frequencia,
-    },
-    cfg,
-  );
-  log(`${id}: inventário ${disponiveis.length} de ${telas.length} tela(s)`);
-  if (!disponiveis.length) {
-    const motivo = `nenhuma tela com inventário para ${dataVeiculacao} a ${frequencia} exibições/dia`;
-    await gravar({ ...estado, erro: motivo });
-    return { estado: "parado", id, motivo };
+  const plano = await lerJson<PlanoNoticias>(caminhoPlanoNoticias(dataVeiculacao));
+
+  /*
+   * Outra notícia está criando a unidade do dia ou trocando a estratégia dela
+   * neste instante. Esperar o próximo minuto é o certo: duas notícias que leiam
+   * a mesma lista de grupos mandariam duas estratégias, e como a chamada
+   * substitui tudo, a última apagaria a primeira do ar.
+   */
+  if (plano?.criandoEm && Date.now() - Date.parse(plano.criandoEm) < LEASE_SEGUNDOS * 1_000) {
+    return {
+      estado: "aguardando-aprovacao",
+      id,
+      grupoId: estado.grupoId,
+      auditoria: `plano de ${dataVeiculacao} em atualização`,
+    };
   }
 
-  await gravar({ ...estado, criandoEm: new Date().toISOString() });
+  const amarracao =
+    plano && plano.unidadeId
+      ? await entrarNoPlano(estado, estado.grupoId, { ...plano, unidadeId: plano.unidadeId }, {
+          cfg,
+          log,
+          frequencia,
+        })
+      : await abrirPlano(estado, estado.grupoId, dataVeiculacao, {
+          cfg,
+          log,
+          cidade,
+          frequencia,
+        });
 
-  const unidadeId = await createOrder(
-    {
-      cityId: cidade,
-      targetIds: disponiveis,
-      goalLocationNum: disponiveis.length,
-      startDate: dataVeiculacao,
-      endDate: dataVeiculacao,
-      durationInSecond: estado.duracao,
-      frequency: frequencia,
-    },
-    cfg,
-  );
-  log(`${id}: unidade ${unidadeId} criada`);
-
-  // Unidade sem criativo trava inventário e não exibe nada.
-  try {
-    await createOrderStrategy(unidadeId, [estado.grupoId], cfg);
-  } catch (e) {
-    log(`${id}: amarramento falhou — cancelando a unidade ${unidadeId}`);
-    await cancelOrder(unidadeId, cfg).catch((err) =>
-      console.error(`[noticia] cancelamento também falhou, cancele no portal: ${err}`),
-    );
-    await gravar({ ...estado, criandoEm: undefined }).catch(() => {});
-    throw e;
+  if ("motivo" in amarracao) {
+    await gravar({ ...estado, erro: amarracao.motivo, criandoEm: undefined });
+    log(`${id}: ${amarracao.motivo} — envio parado`);
+    return { estado: "parado", id, motivo: amarracao.motivo };
   }
 
-  // O nome do plano leva a data e o índice: com várias notícias no mesmo dia,
-  // só a data não distingue uma da outra na lista do portal.
-  await nomearPlano(
-    unidadeId,
-    dataVeiculacao,
-    cfg,
-    log,
-    `${nomeDoPlano(dataVeiculacao)} N${estado.indice}`,
-  );
-
-  const detalhe = await getOrderDetail(unidadeId, cfg);
-  const travadas = detalhe.orderItems[0]?.reservedLocationIds?.length ?? 0;
   await gravar({
     ...estado,
-    unidadeId,
+    unidadeId: amarracao.unidadeId,
     agendadoEm: new Date().toISOString(),
-    telas: travadas,
+    telas: amarracao.telas,
     criandoEm: undefined,
   });
-  log(`${id}: no ar em ${travadas} tela(s)`);
+  log(`${id}: no ar em ${amarracao.telas} tela(s), plano ${amarracao.unidadeId}`);
 
-  return { estado: "no-ar", id, unidadeId, telas: travadas };
+  return { estado: "no-ar", id, unidadeId: amarracao.unidadeId, telas: amarracao.telas };
 }
 
 /** Uma linha legível por passo, para log e para a tela. */

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 
-import { dataEmSaoPaulo } from "@/lib/kuma/agendar";
+import { dataEmSaoPaulo, FREQUENCIA_PADRAO } from "@/lib/kuma/agendar";
+import { slotsDaFrequencia } from "@/lib/kuma/noticiaPlano";
 import { nomeMaterialNoticia } from "@/lib/kuma/newsGroup";
 import { caminhoNoticia, idNoticia, type EstadoNoticia } from "@/lib/kuma/noticiaEstado";
 import { lerJson, uploadPublico } from "@/lib/server/supabaseUpload";
@@ -23,6 +24,12 @@ export const maxDuration = 120;
  * justamente porque notícia é imagem: o spec do Kuma limita JPG a 2 MB, então
  * os dois formatos juntos cabem folgados. É o que dispensa Chromium, ffmpeg e
  * runner de CI — o arquivo que o operador vê na tela é o mesmo que sobe.
+ *
+ * O que esta rota recusa, e antes não recusava, é o envio que não caberia no
+ * plano do dia: as notícias de uma data dividem **uma** unidade, e ela tem um
+ * número fixo de vagas e uma duração só. Recusar aqui é o único momento em que
+ * a recusa é barata — depois do upload o índice já foi gasto, e índice gasto não
+ * volta (nome de material repetido é reprovado com 502 e feedback vazio).
  */
 
 type Corpo = {
@@ -40,17 +47,25 @@ type Corpo = {
 const MAX_BYTES = 2 * 1024 * 1024;
 
 /**
- * Próximo índice livre do dia.
+ * O que o dia já tem: os envios registrados e o próximo índice livre.
  *
  * O índice separa as notícias de um mesmo dia e entra no nome do arquivo — e
  * nome repetido entre requisições é reprovado pelo Kuma com 502 e feedback
  * vazio. Procurar o primeiro id livre é o que garante que dois envios no mesmo
  * dia não colidam.
+ *
+ * A varredura para no primeiro id ausente, e os envios devolvidos são os que
+ * vêm antes dele — que é exatamente o que a busca pelo índice livre já
+ * enxergava. Ler o bucket inteiro para contar quatro notícias não se paga.
  */
-async function proximoIndice(dataISO: string): Promise<number> {
+async function varrerDia(
+  dataISO: string,
+): Promise<{ envios: EstadoNoticia[]; indice: number }> {
+  const envios: EstadoNoticia[] = [];
   for (let i = 1; i <= 50; i++) {
     const existe = await lerJson<EstadoNoticia>(caminhoNoticia(idNoticia(dataISO, i)));
-    if (!existe) return i;
+    if (!existe) return { envios, indice: i };
+    envios.push(existe);
   }
   throw new Error(`já existem 50 envios para ${dataISO} — algo está errado`);
 }
@@ -103,7 +118,45 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const indice = await proximoIndice(data);
+  const { envios, indice } = await varrerDia(data);
+
+  /*
+   * As notícias do dia dividem uma unidade só, e a quantidade de grupos
+   * criativos numa unidade precisa dividir `frequency/60` — com os 240
+   * exibições/dia da operação são quatro vagas. Envio parado por erro não ocupa
+   * vaga: o grupo dele nunca foi amarrado.
+   */
+  const frequencia = Number(process.env.KUMA_CLIMA_FREQUENCIA ?? FREQUENCIA_PADRAO);
+  const vagas = slotsDaFrequencia(frequencia);
+  const naEsteira = envios.filter((e) => !e.erro);
+  if (naEsteira.length >= vagas) {
+    return Response.json(
+      {
+        error:
+          `O plano de ${data} já tem ${naEsteira.length} notícia(s) — é o máximo que ` +
+          `${frequencia} exibições/dia comporta. Envie amanhã ou cancele uma no portal.`,
+      },
+      { status: 409 },
+    );
+  }
+
+  /*
+   * `durationInSecond` é campo da unidade, não da notícia: uma duração
+   * diferente não caberia no plano do dia, e a recusa depois da aprovação
+   * custaria o índice e a passagem pela Análise Criativa.
+   */
+  const duracaoDoDia = naEsteira[0]?.duracao;
+  if (duracaoDoDia !== undefined && duracaoDoDia !== duracao) {
+    return Response.json(
+      {
+        error:
+          `As notícias de ${data} veiculam em ${duracaoDoDia}s, e esta é de ${duracao}s — ` +
+          "a duração é da unidade, então o dia inteiro usa a mesma.",
+      },
+      { status: 409 },
+    );
+  }
+
   const quando = new Date(`${data}T00:00:00`);
   const tamanhos = ["32", "25"] as const;
 

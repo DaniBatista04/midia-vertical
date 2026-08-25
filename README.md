@@ -80,7 +80,7 @@ Kuma**, na aba Notícias, cria o envio; o resto é automático a partir dali.
 clique → JPGs hospedados no Storage
        → (10 min de propagação) → grupo criativo submetido
        → você aprova no portal
-       → unidade criada + criativo amarrado + plano nomeado
+       → entra no plano do dia (que a primeira notícia cria)
 ```
 
 Aqui não existe GitHub Actions, e é uma vantagem de a notícia ser **imagem**: o
@@ -88,20 +88,36 @@ spec do Kuma limita JPG a 2 MB, então os dois formatos sobem pelo corpo da
 requisição e o arquivo que vai às telas é exatamente o que estava no preview.
 Nada de Chromium, ffmpeg ou runner — o que o clima precisa porque é vídeo.
 
-**Uma unidade por notícia**, por escolha da operação: dá para cancelar ou trocar
-uma sem encostar nas outras do mesmo dia. O custo é inventário separado por
-notícia. Alvo e frequência são os mesmos do clima.
+**Um plano por dia**, com todas as notícias da data dentro dele. Cada notícia
+continua com o seu grupo criativo — é o que passa pela Análise Criativa
+individualmente —, mas os grupos do dia são amarrados na mesma unidade e a tela
+alterna entre eles. Alvo e frequência são os mesmos do clima.
+
+Quantas notícias cabem por dia não é escolha nossa: a Brato exige que o número
+de grupos criativos na estratégia divida `frequency/60`, e a 240 exibições/dia
+isso dá **quatro vagas** — as quatro sem repetição. A quinta é recusada já no
+envio, antes de gastar índice e material. `durationInSecond` também é campo da
+unidade, então o dia inteiro veicula na mesma duração.
+
+Antes era uma unidade por notícia, e um dia com quatro virava quatro planos na
+lista do portal, cada um travando as mesmas telas a 240 exibições/dia. Agora os
+240 são divididos entre elas.
 
 ```
 src/lib/kuma/newsGroup.ts        grupo criativo em JPG, cinco materiais
 src/lib/kuma/noticiaEstado.ts    registro por envio — a fila de trabalho
+src/lib/kuma/noticiaPlano.ts     o plano do dia e a conta das vagas
 src/lib/kuma/publicarNoticia.ts  a esteira, um passo por chamada
 src/app/api/noticias/publicar/   recebe os JPGs do painel
 src/app/api/noticias/agendar/    o cron que empurra os envios abertos
 ```
 
 O registro do envio (`noticias/estado/<data>-<índice>.json`) é também a fila: o
-cron lista o prefixo e avança cada envio um passo por vez. Envio no ar ou parado
+cron lista o prefixo e avança cada envio um passo por vez. Ao lado dele,
+`noticias/plano/<data>.json` guarda a unidade do dia e os grupos já amarrados —
+não existe endpoint para ler a estratégia de uma unidade, e `createOrderStrategy`
+**substitui** a lista inteira, então mandar só o grupo novo tiraria as notícias
+anteriores do ar. Envio no ar ou parado
 sai da varredura. Reprovado grava o motivo e **para** — repetir a mesma falha a
 cada minuto não ajuda ninguém.
 
