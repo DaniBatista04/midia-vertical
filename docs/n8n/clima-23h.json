@@ -71,7 +71,7 @@
     },
     {
       "parameters": {
-        "amount": 45,
+        "amount": 70,
         "unit": "minutes"
       },
       "id": "a1000000-0000-4000-8000-000000000004",
@@ -132,7 +132,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// O dispatch responder 200 so quer dizer que entrou na fila. O que\n// interessa e como o run terminou, 45 min depois — o job leva ~25 min e o\n// YAML corta em 40, entao a esta altura ele ja acabou de um jeito ou de outro.\nconst runs = $input.first().json.workflow_runs || [];\n\nif (!runs.length) {\n  return [{ json: {\n    ok: false,\n    motivo: 'O disparo foi aceito mas nenhum run apareceu no GitHub.',\n    url: 'https://github.com/DaniBatista04/midia-vertical/actions/workflows/clima-diario.yml',\n  } }];\n}\n\nconst run = runs[0];\nconst ok = run.status === 'completed' && run.conclusion === 'success';\n\nlet motivo = '';\nif (run.status !== 'completed') {\n  motivo = `O run ainda esta em \"${run.status}\" 45 min depois — passou do timeout de 40 min do job.`;\n} else if (!ok) {\n  motivo = `O run terminou em \"${run.conclusion}\".`;\n}\n\nreturn [{ json: { ok, motivo, url: run.html_url, run: run.id, criado: run.created_at } }];"
+        "jsCode": "// O dispatch responder 200 so quer dizer que entrou na fila. O que\n// interessa e como o run terminou, 70 min depois — a noite boa leva ~20 min,\n// mas o job espera pela HG e pelo Kuma quando eles falham, e o YAML corta em\n// 60. Esperar menos que o timeout do job faz o alarme gritar por um run que\n// ainda ia dar certo.\nconst runs = $input.first().json.workflow_runs || [];\n\nif (!runs.length) {\n  return [{ json: {\n    ok: false,\n    motivo: 'O disparo foi aceito mas nenhum run apareceu no GitHub.',\n    url: 'https://github.com/DaniBatista04/midia-vertical/actions/workflows/clima-diario.yml',\n  } }];\n}\n\nconst run = runs[0];\nconst ok = run.status === 'completed' && run.conclusion === 'success';\n\nlet motivo = '';\nif (run.status !== 'completed') {\n  motivo = `O run ainda esta em \"${run.status}\" 70 min depois — passou do timeout de 60 min do job.`;\n} else if (!ok) {\n  motivo = `O run terminou em \"${run.conclusion}\".`;\n}\n\nreturn [{ json: { ok, motivo, url: run.html_url, run: run.id, criado: run.created_at } }];"
       },
       "id": "a1000000-0000-4000-8000-000000000006",
       "name": "Avalia o resultado",

@@ -34,6 +34,36 @@ export function primeiraDataPossivel(payload: DayPayload): string | null {
 }
 
 /**
+ * Marcador no começo do erro de card incompleto.
+ *
+ * O job das 23h lê a mensagem que vem do browser para decidir se vale tentar
+ * de novo, e é este prefixo que ele reconhece. Mudar o texto do erro sem
+ * mudar aqui faz o job desistir na primeira tentativa, em silêncio.
+ */
+export const ERRO_PREVISAO_INCOMPLETA = "previsão horária incompleta";
+
+/**
+ * A janela horária que a HG devolveu de fato, em texto.
+ *
+ * Existe porque as duas causas de card incompleto se parecem no log e pedem
+ * reações opostas: janela curta demais para a data é questão do horário do
+ * disparo, e janela vazia é a HG sem ter publicado as horas — aí tentar de
+ * novo em alguns minutos resolve. Em 29/08/2026 o job das 23h falhou com os
+ * oito horários vazios e o log não dizia qual dos dois casos era, num horário
+ * em que a janela tinha de sobra para o dia seguinte.
+ */
+export function descreverJanela(payload: DayPayload): string {
+  const { allSlots } = payload;
+  if (!allSlots.length) return "a HG não devolveu hora nenhuma em hourly_forecast";
+  const primeira = allSlots[0];
+  const ultima = allSlots[allSlots.length - 1];
+  return (
+    `a janela da HG tem ${allSlots.length}h, de ${primeira.date} ${primeira.hourLabel} ` +
+    `a ${ultima.date} ${ultima.hourLabel}`
+  );
+}
+
+/**
  * Quando o card do dia volta a ser possível, em texto para quem opera.
  *
  * Não é conta exata — depende de a HG publicar as horas — mas dá a ordem certa

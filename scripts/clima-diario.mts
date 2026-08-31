@@ -41,6 +41,7 @@ import {
   submitCreativeGroup,
 } from "../src/lib/kuma/client";
 import { montarGrupoClima, nomeMaterial, traduzirFeedback } from "../src/lib/kuma/weatherGroup";
+import { ERRO_PREVISAO_INCOMPLETA } from "../src/lib/weather/hg";
 import type { ResultadoClima } from "../src/components/weather/AutoRenderer";
 
 const APP_URL = (process.env.APP_URL ?? "").replace(/\/+$/, "");
@@ -76,6 +77,10 @@ const ESPERA_AUDITORIA = Number(arg("espera") ?? 15);
  * é o clima do dia seguinte não existir.
  */
 const GRACA = Number(arg("graca") ?? 600);
+/** Minutos de espera entre tentativas quando a HG chega sem as horas do dia. */
+const ESPERA_HG = Number(arg("espera-hg") ?? 5);
+/** Tentativas de render antes de desistir da previsão horária. */
+const TENTATIVAS_HG = 3;
 /** Prefixo no nome do grupo, para marcar envio de teste na lista do portal. */
 const PREFIXO = arg("prefixo") ?? "";
 /** `--cru` sobe o MP4 do browser sem passar pelo ffmpeg. Ver `normalizar()`. */
@@ -160,6 +165,33 @@ async function renderizar(cookie: string): Promise<ResultadoClima> {
     return (await page.evaluate(() => window.__clima!.gerar())) as ResultadoClima;
   } finally {
     await browser?.close();
+  }
+}
+
+/**
+ * Renderiza, tolerando a HG chegar sem as horas do dia pedido.
+ *
+ * Em 29/08/2026 o job das 23h abortou com os oito horários vazios e nenhum
+ * card foi para as telas do dia 30 — e às 23h a janela de 24h da HG cobre o
+ * dia seguinte inteiro, então o que faltou foi a HG ter publicado as horas,
+ * não o horário do disparo. É falha que passa sozinha: esperar alguns minutos
+ * e pedir de novo custa muito menos que um dia sem clima na tela.
+ *
+ * Só este erro é repetido. Qualquer outra falha do render sobe na hora — não
+ * adianta gastar quinze minutos do job repetindo o que não vai mudar.
+ */
+async function renderizarComEspera(cookie: string): Promise<ResultadoClima> {
+  for (let i = 1; ; i++) {
+    const restam = TENTATIVAS_HG - i;
+    try {
+      return await renderizar(cookie);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (restam <= 0 || !msg.includes(ERRO_PREVISAO_INCOMPLETA)) throw e;
+      log(msg);
+      log(`esperando ${ESPERA_HG} min pela HG publicar as horas (restam ${restam} tentativas)`);
+      await new Promise((r) => setTimeout(r, ESPERA_HG * 60_000));
+    }
   }
 }
 
@@ -289,7 +321,7 @@ async function main() {
 
   const dataISO = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}-${String(data.getDate()).padStart(2, "0")}`;
   const cookie = await login();
-  const resultado = await renderizar(cookie);
+  const resultado = await renderizarComEspera(cookie);
   log(`renderizado: ${resultado.cidade} · ${resultado.codec}${resultado.convertido ? " + conversão H.265" : ""}`);
 
   if (salvarEm) {
@@ -319,7 +351,10 @@ async function main() {
   }
 
   if (PREFIXO) grupo.name = `${PREFIXO}${grupo.name}`;
-  const enviado = await submitCreativeGroup(grupo, cfg!);
+  // Três tentativas: o 500 de leitura do Kuma derrubou a submissão em 23/08 e
+  // 30/08, e aqui não existe próxima passada — se este envio não entrar, o dia
+  // seguinte amanhece sem clima nas telas.
+  const enviado = await submitCreativeGroup(grupo, cfg!, 3);
   log(`grupo criativo ${enviado.id} enviado — ${descreverAuditoria(enviado.audit.status)}`);
   log(`aparece na Análise Criativa como "${grupo.name}"`);
 

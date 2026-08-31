@@ -5,7 +5,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { drawFrame, loadLogo } from "@/lib/weather/draw";
 import { BITRATE, encodeScene, pickCodec, transcodeToHevc, type CodecChoice } from "@/lib/weather/encode";
 import {
+  ERRO_PREVISAO_INCOMPLETA,
   buildDaySlots,
+  descreverJanela,
   fetchDay,
   fetchWeek,
   sliceWeekFromDate,
@@ -122,11 +124,15 @@ export function AutoRenderer() {
       // 23h ela cobre o dia seguinte inteiro, mas rodando de manhã o fim da
       // tarde de amanhã ainda não existe. Sem esta trava o card sai com "—" no
       // lugar da temperatura e ninguém percebe até estar na tela.
+      //
+      // A janela medida entra na mensagem porque o mesmo erro tem duas causas
+      // com reações diferentes — janela curta para a data pedida, ou a HG sem
+      // horas publicadas — e sem ela o log não separa uma da outra.
       const vazios = slots.filter((s) => s.temp === "—").map((s) => s.hour);
       if (vazios.length) {
         throw new Error(
-          `previsão horária incompleta para ${dataISO}: sem dado em ${vazios.join(", ")} — ` +
-            "a janela da HG cobre 24h a partir de agora",
+          `${ERRO_PREVISAO_INCOMPLETA} para ${dataISO}: sem dado em ${vazios.join(", ")} — ` +
+            descreverJanela(payload),
         );
       }
       cidade = payload.city;

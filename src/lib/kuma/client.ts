@@ -180,15 +180,70 @@ async function call<T>(
   }
 }
 
-/** Submete um grupo criativo. Cada submissão cria um grupo novo. */
+/**
+ * O gateway do Kuma diz, dentro da mensagem do 500, qual serviço interno não
+ * respondeu — como em `... failed to respond executing POST
+ * https://portal-server-merlion.internal.brato.info/v1/portal/getCustomersByCustomerIds`.
+ * Só os de leitura (`get…`, `query…`, `list…`, `inquire…`) interessam: se a
+ * chamada morreu buscando dado, ela morreu antes de criar coisa alguma.
+ */
+const LEITURA_UPSTREAM = /failed to respond executing\s+\S+\s+\S*?\/(get|query|list|inquire)[A-Za-z]/i;
+
+/**
+ * O 5xx que dá para repetir sem risco de duplicar.
+ *
+ * A prova é de 30/08/2026: a submissão das 23h caiu num 500 de
+ * `getCustomersByCustomerIds` e, no dia seguinte, o mesmo grupo foi reenviado
+ * com os mesmos nomes de arquivo e foi **aprovado**. Se o 500 tivesse criado o
+ * grupo, o reenvio teria sido reprovado com 502 e feedback vazio, que é o que
+ * nome de arquivo repetido entre requisições gera.
+ *
+ * Qualquer outro 5xx continua sem repetição: pode ter falhado depois de
+ * escrever, e a resposta não permite saber.
+ */
+export function repetivelSemDuplicar(err: unknown): boolean {
+  if (!(err instanceof KumaError)) return false;
+  // Erro de negócio vem com `errorCode` e não melhora sozinho.
+  if (err.code !== undefined) return false;
+  if ((err.httpStatus ?? 0) < 500) return false;
+  return LEITURA_UPSTREAM.test(err.message);
+}
+
+/**
+ * Submete um grupo criativo. Cada submissão cria um grupo novo.
+ *
+ * `tentativas` acima de 1 só repete o 500 de leitura descrito em
+ * `repetivelSemDuplicar` — nunca a submissão às cegas, que geraria grupo
+ * duplicado e, com o mesmo nome de arquivo, faria o segundo ser reprovado com
+ * 502 sem motivo. Em duas das nove noites de agosto foi esse 500 que impediu o
+ * clima de subir, e a espera até a próxima tentativa passa de um minuto.
+ *
+ * Por isso o padrão é 1: quem publica notícia chama de dentro de uma rota com
+ * `maxDuration` de 120s, e é uma máquina de estado que retoma do mesmo passo na
+ * passada seguinte do cron — dormir aqui só faria a função ser cortada no meio.
+ * Quem pede mais de uma tentativa é o job do clima, que tem uma hora de teto e
+ * nenhuma passada seguinte antes das telas acordarem.
+ */
 export async function submitCreativeGroup(
   req: KumaCreativeGroupRequest,
   cfg: KumaConfig = kumaConfig(),
+  tentativas = 1,
 ): Promise<KumaCreativeGroup> {
-  // Sem retry: submissão repetida gera grupo duplicado e, com o mesmo nome de
-  // arquivo, o segundo é reprovado com 502 sem motivo.
-  const body = await call<unknown>(cfg, "POST", `/management/v1/bidder/${cfg.bidderId}/creativeGroups`, req, 1);
-  return unwrap<KumaCreativeGroup>(body, "id");
+  const path = `/management/v1/bidder/${cfg.bidderId}/creativeGroups`;
+  for (let i = 1; ; i++) {
+    try {
+      const body = await call<unknown>(cfg, "POST", path, req, 1);
+      return unwrap<KumaCreativeGroup>(body, "id");
+    } catch (e) {
+      if (i >= tentativas || !repetivelSemDuplicar(e)) throw e;
+      const espera = 60 * i;
+      console.warn(
+        `[kuma] submissão parou num serviço de leitura do Kuma (tentativa ${i}/${tentativas}); ` +
+          `repetindo em ${espera}s: ${(e as KumaError).message}`,
+      );
+      await new Promise((r) => setTimeout(r, espera * 1_000));
+    }
+  }
 }
 
 /** Consulta a auditoria de um grupo pelo ID. */

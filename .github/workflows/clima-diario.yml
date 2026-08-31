@@ -42,7 +42,12 @@ jobs:
     runs-on: ubuntu-latest
     # Renderizar 250 frames em dois formatos e converter para H.265 leva
     # minutos; o teto existe para o job não ficar preso se o painel travar.
-    timeout-minutes: 40
+    #
+    # Uma noite boa termina em ~20 min. O teto é folgado porque o job agora
+    # espera pelos dois serviços de fora que já derrubaram o clima em agosto:
+    # até 2×5 min pela HG publicar as horas e até 3 min pelo 500 de leitura do
+    # Kuma, somados aos 10 min de propagação e aos 15 de auditoria.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
