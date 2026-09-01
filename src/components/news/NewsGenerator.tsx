@@ -285,7 +285,14 @@ export function NewsGenerator() {
         text:
           `${enviados.length} ${enviados.length === 1 ? "notícia hospedada" : "notícias hospedadas"}. ` +
           "O grupo criativo é submetido em cerca de 10 minutos, e depois aparece " +
-          "na Análise Criativa para aprovação.",
+          "na Análise Criativa para aprovação." +
+          // Quem manda quatro de uma vez espera ver as quatro na tela juntas. Não
+          // é o que acontece, e é melhor dizer aqui do que a operação descobrir
+          // cronometrando: a exibição é de 10s, uma notícia por vez.
+          (enviados.length > 1
+            ? " Depois de aprovadas elas se revezam nas telas, uma por exibição," +
+              " em janelas de meia hora — a exibição continua sendo de 10 segundos."
+            : ""),
         ok: true,
       });
       if (enviados.length > 1) toast(`✓ ${enviados.length} notícias enviadas`, "ok");

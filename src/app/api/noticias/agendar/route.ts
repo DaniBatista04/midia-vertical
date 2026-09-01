@@ -2,7 +2,14 @@ import { timingSafeEqual } from "node:crypto";
 
 import type { NextRequest } from "next/server";
 
-import { avancarNoticia, descreverPasso, type PassoNoticia } from "@/lib/kuma/publicarNoticia";
+import { dataEmSaoPaulo } from "@/lib/kuma/agendar";
+import {
+  avancarNoticia,
+  descreverPasso,
+  rodarRodizio,
+  type PassoNoticia,
+  type PassoRodizio,
+} from "@/lib/kuma/publicarNoticia";
 import { PREFIXO_NOTICIAS, type EstadoNoticia } from "@/lib/kuma/noticiaEstado";
 import { lerJson, listar } from "@/lib/server/supabaseUpload";
 import { SESSION_COOKIE, verifySession } from "@/lib/server/session";
@@ -126,10 +133,33 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  /*
+   * O rodízio do dia, depois dos envios.
+   *
+   * Ele não pertence a envio nenhum: a estratégia da unidade carrega um grupo
+   * criativo por vez — senão as notícias tocam emendadas e o bloco de 10s cresce
+   * com a quantidade delas — e alguém precisa passar a vez ao longo do dia.
+   * Envio que já está no ar é `terminado` e sai da varredura acima, então sem
+   * este passo a primeira notícia do dia ficaria com o ar até a meia-noite.
+   *
+   * Só o plano de hoje é revezado. O de ontem tem `startDate` e `endDate` na
+   * data dele e já não exibe nada — trocar a estratégia de um pedido encerrado
+   * seria chamada à toa.
+   */
+  let rodizio: PassoRodizio | null = null;
+  try {
+    rodizio = await rodarRodizio(dataEmSaoPaulo(0), { log });
+  } catch (e) {
+    const erro = e instanceof Error ? e.message : String(e);
+    console.error(`[noticia/${origem}] rodízio falhou: ${erro}`);
+    falhas.push({ id: `rodizio ${dataEmSaoPaulo(0)}`, erro });
+  }
+
   const corpo = {
     ok: falhas.length === 0,
     abertos: passos.length,
     passos,
+    ...(rodizio ? { rodizio } : {}),
     ...(falhas.length ? { falhas } : {}),
   };
   return Response.json(corpo, { status: falhas.length ? 500 : 200 });

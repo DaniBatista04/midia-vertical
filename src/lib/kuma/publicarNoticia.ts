@@ -10,8 +10,11 @@
  *
  * Cada envio tem seu próprio grupo criativo — é o que passa pela Análise
  * Criativa individualmente —, mas a **unidade é uma por dia**: todos os grupos
- * do mesmo dia são amarrados nela, e a tela alterna entre eles. Ver
- * `noticiaPlano.ts` para o porquê e para o limite que a frequência impõe.
+ * do mesmo dia são amarrados nela e revezam o ar, um por vez, pelo rodízio que
+ * `rodarRodizio` conduz. Um por vez porque os grupos que ficam juntos na
+ * estratégia tocam emendados: era o bloco de 30s que a operação viu no portal
+ * com quatro notícias no dia. Ver `noticiaPlano.ts` para a medição e para o
+ * limite de notícias que a frequência impõe.
  */
 
 import {
@@ -38,7 +41,8 @@ import {
 import { montarGrupoNoticia } from "./newsGroup";
 import {
   caminhoPlanoNoticias,
-  gruposEmSlots,
+  grupoDaVez,
+  JANELA_RODIZIO_MINUTOS,
   slotsDaFrequencia,
   type PlanoNoticias,
 } from "./noticiaPlano";
@@ -65,7 +69,7 @@ export type PassoNoticia =
   | { estado: "aguardando-propagacao"; id: string; faltamSegundos: number }
   | { estado: "submetido"; id: string; grupoId: string }
   | { estado: "aguardando-aprovacao"; id: string; grupoId: string; auditoria: string }
-  | { estado: "no-ar"; id: string; unidadeId: string; telas: number }
+  | { estado: "no-ar"; id: string; unidadeId: string; telas: number; daVez: boolean }
   | { estado: "ja-no-ar"; id: string; unidadeId: string }
   | { estado: "parado"; id: string; motivo: string };
 
@@ -85,8 +89,15 @@ async function gravarPlano(plano: PlanoNoticias): Promise<void> {
   });
 }
 
-/** Onde a notícia foi amarrada, ou o motivo de ela não ter sido. */
-type Amarracao = { unidadeId: string; telas: number } | { motivo: string };
+/**
+ * Onde a notícia foi amarrada, ou o motivo de ela não ter sido.
+ *
+ * `daVez` diz se ela é o grupo criativo que está na estratégia **agora**. Estar
+ * no plano e estar no ar deixaram de ser a mesma coisa quando a estratégia
+ * passou a carregar um grupo por vez, e o log da operação precisa distinguir os
+ * dois — uma notícia que entrou às 15h e estreia às 15h30 não está com defeito.
+ */
+type Amarracao = { unidadeId: string; telas: number; daVez: boolean } | { motivo: string };
 
 /**
  * Abre a unidade do dia e amarra nela a primeira notícia.
@@ -151,7 +162,7 @@ async function abrirPlano(
 
   // Unidade sem criativo trava inventário e não exibe nada.
   try {
-    await createOrderStrategy(unidadeId, gruposEmSlots([grupoId], frequencia), cfg);
+    await createOrderStrategy(unidadeId, [grupoId], cfg);
   } catch (e) {
     log(`${id}: amarramento falhou — cancelando a unidade ${unidadeId}`);
     await cancelOrder(unidadeId, cfg).catch((err) =>
@@ -169,6 +180,7 @@ async function abrirPlano(
     ...reserva,
     unidadeId,
     grupos: [grupoId],
+    noAr: grupoId,
     telas: travadas,
     atualizadoEm: new Date().toISOString(),
     criandoEm: undefined,
@@ -181,7 +193,7 @@ async function abrirPlano(
    */
   await nomearPlano(unidadeId, data, cfg, log, `${nomeDoPlano(data)} NEWS`);
 
-  return { unidadeId, telas: travadas };
+  return { unidadeId, telas: travadas, daVez: true };
 }
 
 /**
@@ -220,10 +232,15 @@ async function unidadeDoPlano(
 /**
  * Amarra a notícia no plano que o dia já tem.
  *
- * `createOrderStrategy` **substitui** a estratégia inteira, então a chamada leva
- * os grupos anteriores mais o novo — mandar só o novo tiraria as outras notícias
- * do ar. Nenhuma tela é travada aqui: a unidade já reservou as dela quando
- * nasceu, e é justamente isso que a mudança economiza — antes, quatro notícias
+ * A notícia entra na lista de grupos do plano, e quem decide se ela vai para a
+ * estratégia agora é o rodízio: a estratégia carrega **um** grupo por vez, senão
+ * as notícias tocam emendadas e o bloco de 10s viraria 20s, 30s, 40s. Se o
+ * relógio disser que a vez é dela, a troca acontece aqui mesmo — a notícia
+ * recém-aprovada estreia em minutos. Se não, ela fica registrada e espera a
+ * volta do rodízio, sem nenhuma chamada ao Kuma.
+ *
+ * Nenhuma tela é travada aqui: a unidade já reservou as dela quando nasceu, e é
+ * justamente isso que o plano compartilhado economiza — antes, quatro notícias
  * eram quatro unidades pedindo 240 exibições/dia cada nas mesmas telas.
  */
 async function entrarNoPlano(
@@ -240,7 +257,7 @@ async function entrarNoPlano(
   // foi gravar o envio. Repetir a chamada não estragaria nada, mas nada mudaria.
   if (plano.grupos.includes(grupoId)) {
     log(`${id}: grupo ${grupoId} já estava no plano ${plano.unidadeId}`);
-    return { unidadeId: plano.unidadeId, telas: plano.telas ?? 0 };
+    return { unidadeId: plano.unidadeId, telas: plano.telas ?? 0, daVez: plano.noAr === grupoId };
   }
 
   if (plano.duracao !== estado.duracao) {
@@ -280,32 +297,126 @@ async function entrarNoPlano(
   await gravarPlano({ ...plano, criandoEm: agora });
   await gravar({ ...estado, criandoEm: agora });
 
-  try {
-    await createOrderStrategy(plano.unidadeId, gruposEmSlots(grupos, frequencia), cfg);
-  } catch (e) {
-    /*
-     * Aqui a unidade **não** é cancelada, ao contrário do caminho que a cria:
-     * ela já tem as notícias anteriores no ar, e derrubá-la por causa de uma que
-     * não entrou tiraria as outras junto. A lista fica como estava e o cron
-     * tenta de novo no minuto seguinte.
-     */
-    await gravarPlano({ ...plano, criandoEm: undefined }).catch(() => {});
-    await gravar({ ...estado, criandoEm: undefined }).catch(() => {});
-    throw e;
+  const daVez = grupoDaVez(grupos) ?? grupoId;
+  let noAr = plano.noAr;
+  if (daVez !== noAr) {
+    try {
+      await createOrderStrategy(plano.unidadeId, [daVez], cfg);
+      noAr = daVez;
+    } catch (e) {
+      /*
+       * Aqui a unidade **não** é cancelada, ao contrário do caminho que a cria:
+       * ela já tem as notícias anteriores no ar, e derrubá-la por causa de uma que
+       * não entrou tiraria as outras junto. A lista fica como estava e o cron
+       * tenta de novo no minuto seguinte.
+       */
+      await gravarPlano({ ...plano, criandoEm: undefined }).catch(() => {});
+      await gravar({ ...estado, criandoEm: undefined }).catch(() => {});
+      throw e;
+    }
   }
 
   await gravarPlano({
     ...plano,
     grupos,
+    noAr,
     telas,
     atualizadoEm: new Date().toISOString(),
     criandoEm: undefined,
   });
   log(
-    `${id}: entrou no plano ${plano.unidadeId} — ${grupos.length} notícia(s) em ${slots} slot(s)`,
+    `${id}: entrou no plano ${plano.unidadeId} — ${grupos.length} de até ${slots} notícia(s), ` +
+      `${noAr === grupoId ? "já no ar" : `no ar segue ${noAr}`}`,
   );
 
-  return { unidadeId: plano.unidadeId, telas };
+  return { unidadeId: plano.unidadeId, telas, daVez: noAr === grupoId };
+}
+
+export type PassoRodizio =
+  | { estado: "trocado"; data: string; unidadeId: string; noAr: string; vez: number; de: number }
+  | { estado: "mantido"; data: string; noAr: string; vez: number; de: number }
+  | { estado: "sem-rodizio"; data: string; motivo: string };
+
+/**
+ * Passa a vez para a próxima notícia do dia.
+ *
+ * Esta é a metade do desenho que fica fora do caminho de cada envio: `avancarNoticia`
+ * leva a notícia até a unidade, e daí em diante quem decide qual das notícias do
+ * dia está no ar é esta função, chamada pelo cron a cada minuto. Ela troca a
+ * estratégia quando o relógio virou a janela do rodízio e não faz nada nas
+ * outras voltas — a comparação é contra o `noAr` do registro, então o custo de
+ * uma volta sem troca é a leitura de um JSON.
+ *
+ * Um plano com uma notícia só também passa por aqui, e de propósito: é o que
+ * conserta os planos criados antes do rodízio, que têm a lista inteira de grupos
+ * na estratégia e são exatamente os que a operação viu como 30s. A primeira
+ * volta reduz a estratégia ao grupo da vez e o plano entra no regime novo.
+ */
+export async function rodarRodizio(
+  dataISO: string,
+  opts: { cfg?: KumaConfig; log?: (m: string) => void } = {},
+): Promise<PassoRodizio> {
+  const log = opts.log ?? (() => {});
+  const plano = await lerJson<PlanoNoticias>(caminhoPlanoNoticias(dataISO));
+
+  if (!plano) return { estado: "sem-rodizio", data: dataISO, motivo: "o dia não tem plano" };
+  if (!plano.unidadeId) {
+    return { estado: "sem-rodizio", data: dataISO, motivo: "plano sem unidade ainda" };
+  }
+  if (plano.criandoEm && Date.now() - Date.parse(plano.criandoEm) < LEASE_SEGUNDOS * 1_000) {
+    // Uma notícia está entrando no plano neste instante, e ela também mexe na
+    // estratégia. Duas trocas no mesmo minuto deixariam o registro descrevendo
+    // um grupo e a unidade tocando outro.
+    return { estado: "sem-rodizio", data: dataISO, motivo: "plano em atualização" };
+  }
+
+  const daVez = grupoDaVez(plano.grupos);
+  if (!daVez) {
+    return { estado: "sem-rodizio", data: dataISO, motivo: "plano sem grupo criativo" };
+  }
+  const vez = plano.grupos.indexOf(daVez) + 1;
+  if (daVez === plano.noAr) {
+    return { estado: "mantido", data: dataISO, noAr: daVez, vez, de: plano.grupos.length };
+  }
+
+  const conta = process.env.KUMA_BIDDER_NEWS?.trim();
+  if (!conta) {
+    throw new Error(
+      "KUMA_BIDDER_NEWS não configurada — sem ela o rodízio mexeria na conta do clima.",
+    );
+  }
+  const cfg = opts.cfg ?? kumaConfig(conta);
+
+  const agora = new Date().toISOString();
+  await gravarPlano({ ...plano, criandoEm: agora });
+  try {
+    await createOrderStrategy(plano.unidadeId, [daVez], cfg);
+  } catch (e) {
+    // O registro volta a descrever o que está no ar de verdade: a troca não
+    // aconteceu, então `noAr` continua sendo o grupo anterior. A volta seguinte
+    // do cron tenta de novo.
+    await gravarPlano({ ...plano, criandoEm: undefined }).catch(() => {});
+    throw e;
+  }
+  await gravarPlano({
+    ...plano,
+    noAr: daVez,
+    atualizadoEm: new Date().toISOString(),
+    criandoEm: undefined,
+  });
+
+  log(
+    `plano de ${dataISO}: a vez agora é do grupo ${daVez} (${vez}ª de ${plano.grupos.length}), ` +
+      `por ${JANELA_RODIZIO_MINUTOS} min`,
+  );
+  return {
+    estado: "trocado",
+    data: dataISO,
+    unidadeId: plano.unidadeId,
+    noAr: daVez,
+    vez,
+    de: plano.grupos.length,
+  };
 }
 
 /**
@@ -457,9 +568,19 @@ export async function avancarNoticia(
     telas: amarracao.telas,
     criandoEm: undefined,
   });
-  log(`${id}: no ar em ${amarracao.telas} tela(s), plano ${amarracao.unidadeId}`);
+  log(
+    amarracao.daVez
+      ? `${id}: no ar em ${amarracao.telas} tela(s), plano ${amarracao.unidadeId}`
+      : `${id}: no plano ${amarracao.unidadeId}, ${amarracao.telas} tela(s) — entra no ar na vez dela`,
+  );
 
-  return { estado: "no-ar", id, unidadeId: amarracao.unidadeId, telas: amarracao.telas };
+  return {
+    estado: "no-ar",
+    id,
+    unidadeId: amarracao.unidadeId,
+    telas: amarracao.telas,
+    daVez: amarracao.daVez,
+  };
 }
 
 /** Uma linha legível por passo, para log e para a tela. */
@@ -472,7 +593,9 @@ export function descreverPasso(p: PassoNoticia): string {
     case "aguardando-aprovacao":
       return `${p.id}: ${p.auditoria}`;
     case "no-ar":
-      return `${p.id}: no ar na unidade ${p.unidadeId}, ${p.telas} tela(s)`;
+      return p.daVez
+        ? `${p.id}: no ar na unidade ${p.unidadeId}, ${p.telas} tela(s)`
+        : `${p.id}: no plano da unidade ${p.unidadeId}, ${p.telas} tela(s), esperando a vez no rodízio`;
     case "ja-no-ar":
       return `${p.id}: já estava no ar na unidade ${p.unidadeId}`;
     case "parado":
