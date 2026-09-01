@@ -39,6 +39,11 @@ export const dynamic = "force-dynamic";
  *    outro sistema, nem revogá-lo só para o n8n sem derrubar o cron de minuto.
  *    Este aqui se apaga sozinho, sem afetar mais nada.
  *
+ *    Ele também é `Sensitive` na Vercel, então **os dois** são write-only: em
+ *    dúvida sobre o valor de um deles, não existe "conferir se bate". O
+ *    conserto é girar — valor novo na Vercel e o mesmo valor em quem chama —, e
+ *    é justamente por poder girar sozinho que este token não é o `CRON_SECRET`.
+ *
  * **O que ela não faz:** criar a unidade. O criativo precisa estar aprovado para
  * receber estratégia, e aprovar é manual no portal. Depois da aprovação, o cron
  * de minuto cria plano e unidade e amarra sozinho — ou o operador clica o link.

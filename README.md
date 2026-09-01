@@ -328,7 +328,7 @@ npm run clima:diario -- --indice=2       # reenvia o mesmo dia (ver abaixo)
 | `CRON_SECRET` | a Vercel manda no `Authorization` do cron; sem ela o cron toma 401 |
 | `CLIMA_TOKEN` | o `?t=` do favorito de quem aprova; sem ela esse caminho fica fechado |
 | `GITHUB_DISPATCH_TOKEN` | token com Actions read/write, para o botão do painel acionar o workflow |
-| `CLIMA_DISPATCH_TOKEN` | o `Bearer` do gatilho das 23h, que hoje vem do n8n; sem ela o disparo toma 401 e não sai clima |
+| `CLIMA_DISPATCH_TOKEN` | o `Bearer` do gatilho das 23h, que hoje vem do n8n; sem ela o disparo toma 401 e não sai clima. `Sensitive`, como todas aqui: não se confere o valor, gira-se |
 
 Ferramentas de operação no mesmo link, para quando algo precisa de conserto à
 mão: `?renomear=<plano>&nome=<nome>` renomeia um plano, e `?limpar=<data>` apaga
