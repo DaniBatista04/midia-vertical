@@ -275,7 +275,7 @@ A rota não prende a escolha do agendador: qualquer coisa que saiba mandar
 máquina com `curl`. Trocar não custa mais que apagar uma linha do `vercel.json`.
 
 Quem dispara hoje é o **n8n** — o fluxo está em `docs/n8n/clima-23h.json`. Ele faz
-o que o cron da Vercel não fazia: espera 45 minutos, lê o resultado do run na API
+o que o cron da Vercel não fazia: espera 70 minutos, lê o resultado do run na API
 do GitHub e avisa quando não deu certo. O bloco de `/api/clima/publicar` saiu do
 `vercel.json` no mesmo movimento: os dois não podem conviver, porque dois
 disparos geram dois grupos criativos para o mesmo dia — o script sobe o índice a
@@ -287,6 +287,20 @@ nem quem administra o projeto consegue lê-lo de volta para configurar outro
 sistema — só rotacionar. E ele guarda também `/api/clima/agendar`, então revogar
 o acesso do n8n significaria derrubar junto o cron de minuto. Um token próprio se
 apaga sozinho.
+
+**Qualquer valor serve, desde que seja igual nos dois lados e não seja
+adivinhável.** Ninguém de fora valida o formato: a rota compara byte a byte o que
+vem depois de `Bearer ` com a variável. Gere como o `AUTH_SECRET`, com `openssl
+rand -hex 32` — hex é ASCII puro, então atravessa cabeçalho HTTP, `vercel env` e
+o campo do n8n sem nada para escapar.
+
+O que **não** serve: valor com espaço ou quebra de linha no fim. A rota não faz
+`trim`, e um `\n` a mais de um lado muda o tamanho e derruba a comparação para
+sempre. `echo "token" | vercel env add` põe essa quebra de linha; use `printf` ou
+cole o valor no prompt. E nada de acento ou emoji: cabeçalho HTTP é ASCII, e o
+caminho até aqui passa por três camadas que tratam byte alto de jeitos
+diferentes. Adivinhável também não: esta rota gasta vinte minutos de runner e
+deixa grupo criativo para alguém aprovar, e não tem limite de tentativas.
 
 O nó que lê o run **não** precisa de credencial: o repositório é público e a API
 de runs do GitHub responde anônima (60 requisições por hora por IP, contra uma
