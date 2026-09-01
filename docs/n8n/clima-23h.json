@@ -203,12 +203,12 @@
     },
     {
       "parameters": {
-        "errorMessage": "=Clima das 23h: o disparo nem saiu — a rota /api/clima/publicar respondeu erro. Conferir CRON_SECRET e se o deploy esta no ar."
+        "jsCode": "// O que a rota respondeu, para o alarme citar em vez de mandar procurar.\n// Sem isto o aviso era fixo — falava de CRON_SECRET e do deploy — e a noite\n// de 31/08/2026 custou a manha seguinte: a rota tinha respondido 401 com o\n// motivo no corpo, e nada disso chegava a mensagem.\nconst j = $input.first().json || {};\n\n// A forma do item de erro do no HTTP Request muda entre versoes do n8n, e o\n// corpo da resposta as vezes vem em `error`, as vezes solto. Procura nos dois.\nconst e = j.error || {};\nconst status = e.httpCode ?? e.statusCode ?? e.status ?? j.statusCode ?? '?';\n\n// O corpo interessa mais que a mensagem: e nele que a rota escreve o motivo.\nconst cru = e.description ?? e.raw ?? e.body ?? j.body ?? e.message ?? j.message ?? j;\nconst texto = typeof cru === 'string' ? cru : JSON.stringify(cru);\n\n// Cada status sai de um lugar diferente do codigo, e o conserto tambem.\nconst onde = {\n  '401': 'A credencial \"Clima - CLIMA_DISPATCH_TOKEN\" no n8n. O campo Value tem de comecar com \"Bearer \" e o resto tem de ser identico a CLIMA_DISPATCH_TOKEN na Vercel, sem espaco nem quebra de linha no fim. ATENCAO: reimportar este JSON desfaz a ligacao da credencial — se voce acabou de importar, reabra o no \"Dispara o clima\" e escolha a credencial de novo.',\n  '503': 'GITHUB_DISPATCH_TOKEN nao esta no projeto da Vercel.',\n  '502': 'A rota chamou o GitHub e ele recusou o dispatch — o texto acima e a resposta dele. Costuma ser o token expirado ou sem permissao de Actions.',\n}[String(status)] || 'Nem chegou resposta HTTP: a rota caiu ou o n8n nao alcancou o dominio.';\n\nreturn [{ json: { status, corpo: String(texto).slice(0, 300), onde } }];"
       },
-      "id": "a1000000-0000-4000-8000-000000000010",
-      "name": "Avisa: disparo falhou",
-      "type": "n8n-nodes-base.stopAndError",
-      "typeVersion": 1,
+      "id": "a1000000-0000-4000-8000-000000000013",
+      "name": "Le a recusa",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
       "position": [
         60,
         440
@@ -216,8 +216,21 @@
     },
     {
       "parameters": {
-        "content": "## Antes de ativar\n\n**1. Fuso do workflow.** Settings > Timezone > `America/Sao_Paulo`. Sem isso o `0 23 * * *` vale no fuso da instancia — e as 20h a janela da HG nao alcanca as 22:00 do dia seguinte.\n\n**2. Uma credencial Header Auth** (so uma — o repo e publico, entao o no `Busca o run` nao precisa de token):\n\n`Clima - CLIMA_DISPATCH_TOKEN`\n- Name: `Authorization`\n- Value: `Bearer <CLIMA_DISPATCH_TOKEN>`\n\nO mesmo valor tem que estar na Vercel, na variavel `CLIMA_DISPATCH_TOKEN` (Production).\n\n**3. O cron da Vercel ja foi removido** do `vercel.json`. Este fluxo e o unico gatilho das 23h — se ele estiver desligado, nao sai clima.",
-        "height": 420,
+        "errorMessage": "={{ 'Clima das 23h: o disparo nem saiu — nenhum run foi criado no GitHub. A rota /api/clima/publicar respondeu HTTP ' + $json.status + ': ' + $json.corpo + ' | Onde conferir: ' + $json.onde }}"
+      },
+      "id": "a1000000-0000-4000-8000-000000000010",
+      "name": "Avisa: disparo falhou",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        320,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Antes de ativar\n\n**1. Fuso do workflow.** Settings > Timezone > `America/Sao_Paulo`. Sem isso o `0 23 * * *` vale no fuso da instancia — e as 20h a janela da HG nao alcanca as 22:00 do dia seguinte.\n\n**2. Uma credencial Header Auth** (so uma — o repo e publico, entao o no `Busca o run` nao precisa de token):\n\n`Clima - CLIMA_DISPATCH_TOKEN`\n- Name: `Authorization`\n- Value: `Bearer <CLIMA_DISPATCH_TOKEN>` — o `Bearer ` **faz parte do valor**. Sem ele a rota responde 401, porque le so o que vem depois de `Bearer `.\n\nO mesmo token tem que estar na Vercel, na variavel `CLIMA_DISPATCH_TOKEN` (Production), identico — espaco ou quebra de linha no fim tambem da 401.\n\n**3. Reimportar este JSON desfaz a ligacao da credencial.** O `credentials.id` aqui e um placeholder (`TROCAR`), entao a importacao aponta o no para uma credencial que nao existe e o disparo passa a tomar 401 — foi o que apagou o clima na noite de 31/08/2026, horas depois de o arquivo ser reimportado para pegar a espera de 70 min. **Depois de qualquer importacao**, abra o no `Dispara o clima` e escolha a credencial de novo.\n\n**4. O cron da Vercel ja foi removido** do `vercel.json`. Este fluxo e o unico gatilho das 23h — se ele estiver desligado, nao sai clima.",
+        "height": 620,
         "width": 420,
         "color": 3
       },
@@ -281,7 +294,7 @@
         ],
         [
           {
-            "node": "Avisa: disparo falhou",
+            "node": "Le a recusa",
             "type": "main",
             "index": 0
           }
@@ -333,6 +346,17 @@
         [
           {
             "node": "Avisa: run falhou",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Le a recusa": {
+      "main": [
+        [
+          {
+            "node": "Avisa: disparo falhou",
             "type": "main",
             "index": 0
           }

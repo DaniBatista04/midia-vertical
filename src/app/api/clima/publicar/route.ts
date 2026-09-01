@@ -184,7 +184,28 @@ export async function GET(req: NextRequest) {
   const daVercel = segredoConfere(recebido, process.env.CRON_SECRET);
   const deFora = segredoConfere(recebido, process.env.CLIMA_DISPATCH_TOKEN);
   if (!recebido || !(daVercel || deFora)) {
-    return Response.json({ error: "Não autenticado" }, { status: 401 });
+    // Por que a recusa diz o motivo, em vez de só "não autenticado". Na noite
+    // de 31/08/2026 o disparo das 23h tomou 401 e nada ficou registrado: o log
+    // da Vercel guardou só o status, e o alarme do n8n sabia dizer apenas "a
+    // rota respondeu erro — conferir CRON_SECRET e se o deploy está no ar".
+    // Ambos os palpites estavam errados, e a caça consumiu a manhã seguinte:
+    // o deploy respondia, e o segredo citado não é nem o que o n8n usa.
+    //
+    // O 401 aqui é sempre configuração de quem chama, e as três formas de
+    // errar pedem conserto em lugares diferentes — então a rota nomeia qual
+    // foi, e grava, para a próxima madrugada não começar do zero.
+    //
+    // Nenhuma das três frases conta nada que o chamador já não tenha em mãos:
+    // a forma do cabeçalho está neste arquivo, num repositório público. O que
+    // **não** entra aqui é o token recebido, nem qualquer pedaço dele, nem se
+    // o tamanho bateu — isso viraria um oráculo para adivinhar o segredo.
+    const motivo = !auth
+      ? "sem cabeçalho Authorization"
+      : !auth.startsWith("Bearer ")
+        ? 'o cabeçalho Authorization não começa com "Bearer "'
+        : "o token do Bearer não é o CRON_SECRET nem o CLIMA_DISPATCH_TOKEN";
+    console.error(`[publicar/cron] recusado: ${motivo}.`);
+    return Response.json({ error: `Não autenticado — ${motivo}.` }, { status: 401 });
   }
 
   return disparar(
