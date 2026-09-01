@@ -71,6 +71,53 @@
     },
     {
       "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e1",
+              "leftValue": "={{ $json.dryRun }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-4000-8000-000000000014",
+      "name": "Ficou em ensaio?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        60,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Clima das 23h: NADA foi para as telas — o disparo saiu em modo de ensaio. O `?ensaio=true` ficou na URL do no \"Dispara o clima\" depois de um teste. Tire o parametro. Sem esta checagem o fluxo daria tudo verde: o run de ensaio termina em success, entao \"Avalia o resultado\" aprovaria um dia sem clima."
+      },
+      "id": "a1000000-0000-4000-8000-000000000015",
+      "name": "Avisa: ficou em ensaio",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        300,
+        40
+      ]
+    },
+    {
+      "parameters": {
         "amount": 70,
         "unit": "minutes"
       },
@@ -79,7 +126,7 @@
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
-        60,
+        300,
         200
       ],
       "webhookId": "b1000000-0000-4000-8000-000000000004"
@@ -126,7 +173,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        280,
+        520,
         200
       ]
     },
@@ -139,7 +186,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        500,
+        740,
         200
       ]
     },
@@ -173,7 +220,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        720,
+        960,
         200
       ]
     },
@@ -184,7 +231,7 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [
-        960,
+        1200,
         100
       ]
     },
@@ -197,7 +244,7 @@
       "type": "n8n-nodes-base.stopAndError",
       "typeVersion": 1,
       "position": [
-        960,
+        1200,
         300
       ]
     },
@@ -229,7 +276,7 @@
     },
     {
       "parameters": {
-        "content": "## Antes de ativar\n\n**1. Fuso do workflow.** Settings > Timezone > `America/Sao_Paulo`. Sem isso o `0 23 * * *` vale no fuso da instancia — e as 20h a janela da HG nao alcanca as 22:00 do dia seguinte.\n\n**2. Uma credencial Header Auth** (so uma — o repo e publico, entao o no `Busca o run` nao precisa de token):\n\n`Clima - CLIMA_DISPATCH_TOKEN`\n- Name: `Authorization`\n- Value: `Bearer <CLIMA_DISPATCH_TOKEN>` — o `Bearer ` **faz parte do valor**. Sem ele a rota responde 401, porque le so o que vem depois de `Bearer `.\n\n⚠️ **Confira o nome da credencial escolhida no no, nao so que tem uma escolhida.** Esta instancia tem outras Header Auth, e `Webhook-MURAL-Auth` fica vizinha na lista — foi ela que apareceu amarrada no no depois do reimport de 31/08/2026, mandando o `Authorization` do Mural para a rota do clima. O sintoma e identico ao de credencial nenhuma: 401, e nada no n8n dizendo qual token foi enviado.\n\n**3. Nao tente conferir o token comparando com a Vercel.** La ele e `Sensitive`, ou seja write-only: ninguem le de volta, nem voce. Se desconfiar do valor, **gire** em vez de comparar — gere um token novo, sobrescreva `CLIMA_DISPATCH_TOKEN` na Vercel (Production) e cole o mesmo valor aqui, com o `Bearer ` na frente. Girar nao afeta mais nada: e para isso que este token existe separado do `CRON_SECRET`, que guarda os crons de minuto.\n\n**4. Prefira editar o no na tela a reimportar este arquivo.** O `credentials.id` daqui e um placeholder (`TROCAR`), entao a importacao aponta o no para uma credencial que nao existe e o disparo passa a tomar 401 — foi o que apagou o clima na noite de 31/08/2026, horas depois de o arquivo ser reimportado para pegar a espera de 70 min. Este JSON e a referencia versionada do fluxo, nao o jeito de aplicar um ajuste de parametro. Se reimportar mesmo assim, abra o no `Dispara o clima` e escolha a credencial de novo — isso nao exige saber o valor guardado nela.\n\n**5. Para testar sem gastar runner**, ponha `?ensaio=true` no fim da URL do no `Dispara o clima` e execute o fluxo a mao: a rota dispara o workflow em modo de ensaio, que monta o payload e para, sem renderizar nem enviar nada ao Kuma. Tire o parametro depois.\n\n**6. O cron da Vercel ja foi removido** do `vercel.json`. Este fluxo e o unico gatilho das 23h — se ele estiver desligado, nao sai clima.",
+        "content": "## Antes de ativar\n\n**1. Fuso do workflow.** Settings > Timezone > `America/Sao_Paulo`. Sem isso o `0 23 * * *` vale no fuso da instancia — e as 20h a janela da HG nao alcanca as 22:00 do dia seguinte.\n\n**2. Uma credencial Header Auth** (so uma — o repo e publico, entao o no `Busca o run` nao precisa de token):\n\n`Clima - CLIMA_DISPATCH_TOKEN`\n- Name: `Authorization`\n- Value: `Bearer <CLIMA_DISPATCH_TOKEN>` — o `Bearer ` **faz parte do valor**. Sem ele a rota responde 401, porque le so o que vem depois de `Bearer `.\n\n⚠️ **Confira o nome da credencial escolhida no no, nao so que tem uma escolhida.** Esta instancia tem outras Header Auth, e `Webhook-MURAL-Auth` fica vizinha na lista — foi ela que apareceu amarrada no no depois do reimport de 31/08/2026, mandando o `Authorization` do Mural para a rota do clima. O sintoma e identico ao de credencial nenhuma: 401, e nada no n8n dizendo qual token foi enviado.\n\n**3. Nao tente conferir o token comparando com a Vercel.** La ele e `Sensitive`, ou seja write-only: ninguem le de volta, nem voce. Se desconfiar do valor, **gire** em vez de comparar — gere um token novo, sobrescreva `CLIMA_DISPATCH_TOKEN` na Vercel (Production) e cole o mesmo valor aqui, com o `Bearer ` na frente. Girar nao afeta mais nada: e para isso que este token existe separado do `CRON_SECRET`, que guarda os crons de minuto.\n\n**4. Prefira editar o no na tela a reimportar este arquivo.** O `credentials.id` daqui e um placeholder (`TROCAR`), entao a importacao aponta o no para uma credencial que nao existe e o disparo passa a tomar 401 — foi o que apagou o clima na noite de 31/08/2026, horas depois de o arquivo ser reimportado para pegar a espera de 70 min. Este JSON e a referencia versionada do fluxo, nao o jeito de aplicar um ajuste de parametro. Se reimportar mesmo assim, abra o no `Dispara o clima` e escolha a credencial de novo — isso nao exige saber o valor guardado nela.\n\n**5. Para testar sem gastar runner**, ponha `?ensaio=true` no fim da URL do no `Dispara o clima` e execute o fluxo a mao: a rota dispara o workflow em modo de ensaio, que monta o payload e para, sem renderizar nem enviar nada ao Kuma. Tire o parametro depois — e se esquecer, o no `Ficou em ensaio?` grita na hora, porque o run de ensaio termina em `success` e o resto do fluxo aprovaria um dia sem clima.\n\n**6. O cron da Vercel ja foi removido** do `vercel.json`. Este fluxo e o unico gatilho das 23h — se ele estiver desligado, nao sai clima.",
         "height": 900,
         "width": 420,
         "color": 3
@@ -245,7 +292,7 @@
     },
     {
       "parameters": {
-        "content": "## Onde plugar o alarme\n\nOs dois `Stop and Error` fazem a execucao aparecer como falha no n8n — o que ja dispara o Error Workflow, se voce tiver um.\n\nPara receber no Slack/Telegram/e-mail, ponha o no do canal **antes** de cada `Stop and Error`. A mensagem pronta esta em `{{ $json.motivo }}` e o link do run em `{{ $json.url }}`.\n\nO horario tem folga curta de proposito: a janela da HG vai de agora ate 24h a frente e o card precisa chegar as 22:00 do dia seguinte. Disparar mais cedo encurta a cobertura, nao aumenta.",
+        "content": "## Onde plugar o alarme\n\nOs tres `Stop and Error` fazem a execucao aparecer como falha no n8n — o que ja dispara o Error Workflow, se voce tiver um.\n\nPara receber no Slack/Telegram/e-mail, ponha o no do canal **antes** de cada `Stop and Error`. A mensagem pronta esta em `{{ $json.motivo }}` (run falhou) ou `{{ $json.onde }}` (disparo recusado), e o link do run em `{{ $json.url }}`. O de ensaio nao tem campo: a mensagem e fixa.\n\nO horario tem folga curta de proposito: a janela da HG vai de agora ate 24h a frente e o card precisa chegar as 22:00 do dia seguinte. Disparar mais cedo encurta a cobertura, nao aumenta.",
         "height": 340,
         "width": 400,
         "color": 4
@@ -287,7 +334,7 @@
       "main": [
         [
           {
-            "node": "Espera o run terminar",
+            "node": "Ficou em ensaio?",
             "type": "main",
             "index": 0
           }
@@ -357,6 +404,24 @@
         [
           {
             "node": "Avisa: disparo falhou",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ficou em ensaio?": {
+      "main": [
+        [
+          {
+            "node": "Avisa: ficou em ensaio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Espera o run terminar",
             "type": "main",
             "index": 0
           }
