@@ -121,11 +121,11 @@ export async function POST(req: NextRequest) {
   const { envios, indice } = await varrerDia(data);
 
   /*
-   * As notícias do dia dividem uma unidade só, e são quatro vagas com os 240
-   * exibições/dia da operação: elas se revezam no ar em janelas de meia hora
-   * (ver o rodízio em `noticiaPlano.ts`), então mais notícias significa menos
-   * tempo de tela para cada uma, não bloco maior. Envio parado por erro não
-   * ocupa vaga: o grupo dele nunca foi amarrado.
+   * As notícias do dia dividem uma unidade só, e são quatro vagas com as 240
+   * exibições/dia da operação: elas ficam juntas na estratégia e o Kuma reparte
+   * as exibições entre elas, uma por exibição (ver `noticiaPlano.ts`). Mais
+   * notícias significa menos tempo de tela para cada uma, não bloco maior.
+   * Envio parado por erro não ocupa vaga: o grupo dele nunca foi amarrado.
    */
   const frequencia = Number(process.env.KUMA_CLIMA_FREQUENCIA ?? FREQUENCIA_PADRAO);
   const vagas = slotsDaFrequencia(frequencia);

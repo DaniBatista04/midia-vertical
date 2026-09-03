@@ -8,26 +8,50 @@
  * mesmo conteúdo. A unidade do Kuma não precisa disso, e este registro é o que
  * permite juntar as notícias do dia numa unidade só.
  *
- * O que **não** dá para fazer é deixar os grupos todos na estratégia ao mesmo
- * tempo. `createOrderStrategy` aceita uma lista, e a leitura de que a tela
- * alternaria entre eles estava errada: os grupos da estratégia tocam
- * **emendados** na mesma exibição. Medido pela operação em 01/09/2026 — quatro
- * notícias num dia deixaram a linha do plano no portal com 30s, enquanto o
- * clima, que tem um grupo criativo só, aparece com os 10s de sempre. Cada
- * notícia continua sendo um material de 10s, mas o bloco na tela crescia com a
- * quantidade delas.
+ * As notícias do dia ficam **todas na estratégia ao mesmo tempo**, e quem
+ * reparte as exibições entre elas é o Kuma: com 240 exibições/dia e quatro
+ * notícias, cada uma pega 60, uma por exibição, espalhadas pelo dia inteiro. A
+ * unidade não manda `hours`, então isso vale para todas as janelas do dia.
  *
- * Por isso a estratégia carrega **um** grupo por vez (`noAr`), e o rodízio
- * entre as notícias do dia é nosso: o cron troca o grupo da vez a cada
- * `JANELA_RODIZIO_MINUTOS`. O bloco na tela fica em 10s independentemente de
- * quantas notícias forem selecionadas, e cada uma pega a sua fatia do dia.
+ * ## A tentativa de rodízio, e por que ela saiu
+ *
+ * Entre 01/09 e 03/09/2026 a estratégia carregou **um** grupo por vez, com o
+ * cron trocando o grupo do ar a cada meia hora. A leitura por trás disso era
+ * que grupos juntos na estratégia tocariam emendados na mesma exibição, e a
+ * medida que sustentava a leitura era a linha do plano no portal marcando 30s
+ * num dia de notícias. A operação viu o resultado nas telas e recusou: uma
+ * notícia ficava o turno inteiro no ar, e a troca só vinha quando a janela
+ * virava.
+ *
+ * Os 30s do portal eram a soma dos criativos amarrados, não o bloco de uma
+ * exibição. O que a `Creative Interface API` (§2.1 e §2.2, em `docs/api-kuma/`)
+ * define é que o grupo criativo é **um anúncio**: `creatives` é um por tipo de
+ * tela, `materials` dentro de cada um é *um* para tela cheia e *dois* só no 19",
+ * que é tela dividida — o material 0 é a de cima e o 1 a de baixo, não uma fila
+ * de exibição. A duração do anúncio é a `duration` do grupo, e ela não cresce
+ * porque a estratégia tem vizinhos.
+ *
+ * ## Por que a estratégia reparte, e não emenda
+ *
+ * Duas evidências, já que a API não documenta isso:
+ *
+ *  - a exigência da Brato que o `gruposParaEstrategia` obedece — o número de
+ *    grupos precisa dividir `frequency/60` — só faz sentido para quem divide a
+ *    frequência entre eles; e
+ *  - o `focusmediapublisher`, que faz isso em produção há mais tempo: lá vários
+ *    comunicados dividem a mesma unidade, todos os grupos entram juntos na
+ *    estratégia (é o `padGroupIdsForFrequency` de lá), e as telas dos prédios
+ *    mostram um comunicado por exibição. Se emendassem, um prédio com cinco
+ *    comunicados ativos exibiria um bloco de mais de um minuto.
+ *
+ * ## O registro
  *
  * O arquivo mora ao lado dos envios, em `noticias/plano/`, e é a única memória
  * de quais grupos já estão amarrados naquele dia: não existe endpoint para ler
  * a estratégia de uma unidade, então quem chama precisa guardar a lista. E
- * precisa mesmo — `createOrderStrategy` **substitui** a estratégia inteira, que
- * é exatamente o que o rodízio usa para trocar o grupo do ar, e o que faria as
- * notícias anteriores sumirem se a lista fosse remontada errada.
+ * precisa mesmo — `createOrderStrategy` **substitui** a estratégia inteira, e é
+ * remontando a lista do zero a cada notícia nova que as anteriores continuam no
+ * ar.
  */
 
 export type PlanoNoticias = {
@@ -59,14 +83,16 @@ export type PlanoNoticias = {
   grupos: string[];
 
   /**
-   * Grupo criativo que está na estratégia da unidade **agora**.
+   * A lista que foi mandada no último `createOrderStrategy` — já com o padding
+   * do `gruposParaEstrategia`, e por isso diferente de `grupos`.
    *
-   * É sempre um só, e é o que mantém o bloco da notícia em 10s na tela. Sem
-   * este campo não haveria como saber se a troca do rodízio já foi feita: o
-   * Kuma não tem endpoint para ler a estratégia de uma unidade, então o que
-   * está no ar é o que este registro disser que está.
+   * O Kuma não tem endpoint para ler a estratégia de uma unidade: o que está no
+   * ar é o que este campo disser que está. É o que permite ao cron perceber que
+   * a estratégia ficou para trás — de uma volta que falhou no meio, ou de um
+   * plano criado quando o rodízio ainda existia — sem gastar uma chamada por
+   * minuto para reescrever o que já está certo.
    */
-  noAr?: string;
+  estrategia?: string[];
 
   /** Telas efetivamente travadas pela unidade. */
   telas?: number;
@@ -93,50 +119,43 @@ export function caminhoPlanoNoticias(dataISO: string): string {
 /**
  * Quantas notícias a operação divide num dia, com essa frequência.
  *
- * O número nasceu de uma exigência da Brato: a quantidade de grupos criativos
- * na estratégia precisa dividir `frequency/60`, e com os 240 exibições/dia da
+ * O número nasce de uma exigência da Brato: a quantidade de grupos criativos na
+ * estratégia precisa dividir `frequency/60`, e com as 240 exibições/dia da
  * operação isso dá 4. Custou caro no `focusmediapublisher` (é o
  * `padGroupIdsForFrequency` de lá) e não está em documento nenhum da API.
  *
- * Com o rodízio a exigência deixou de pesar — a estratégia leva um grupo só, e
- * 1 divide qualquer coisa. O teto de 4 fica porque continua sendo o número que
- * a operação combinou: as 240 exibições do dia repartidas entre mais notícias
- * dariam a cada uma um pedaço pequeno demais para alguém notar que passou.
- * Mudar esse teto é decisão da operação, não consequência da API.
+ * O teto também é o que a operação combinou: as 240 exibições do dia repartidas
+ * entre mais notícias dariam a cada uma um pedaço pequeno demais para alguém
+ * notar que passou. Com quatro, cada uma fica com 60 exibições no dia.
  */
 export function slotsDaFrequencia(frequencia: number): number {
   return Math.max(1, Math.floor(frequencia / 60));
 }
 
 /**
- * Por quanto tempo cada notícia fica no ar antes de passar a vez.
+ * A lista de grupos que vai no `createOrderStrategy`.
  *
- * Meia hora é o meio-termo entre duas coisas que puxam para lados opostos: a
- * troca custa uma chamada de `createOrderStrategy` (48 por dia no pior caso, ao
- * lado de um cron que já bate de minuto em minuto, então é barato), e uma
- * janela curta demais faria a notícia entrar e sair antes de o prédio inteiro
- * passar pelo elevador. Com 240 exibições/dia, meia hora são cerca de cinco
- * exibições por turno, e com quatro notícias cada uma volta ao ar a cada duas
- * horas.
+ * A Brato recusa a estratégia quando o número de grupos não divide
+ * `frequency/60` — a fatia de cada grupo precisa fechar em minuto cheio. Com
+ * quatro vagas, uma e duas notícias passam direto, e **três não**: a lista sobe
+ * para quatro repetindo a primeira, que fica com duas fatias. É desigual de
+ * propósito, e é melhor que a recusa da chamada: a alternativa seria segurar a
+ * terceira notícia fora do ar até chegar uma quarta.
+ *
+ * A repetição de um id na lista é o mesmo recurso que o `focusmediapublisher`
+ * usa em produção, e o Kuma aceita.
  */
-export const JANELA_RODIZIO_MINUTOS = 30;
+export function gruposParaEstrategia(grupos: string[], frequencia: number): string[] {
+  if (!grupos.length) return [];
+  const slots = slotsDaFrequencia(frequencia);
+  // Acima do teto a lista é cortada nas vagas que existem; quem chama já recusa
+  // o envio antes disso, então aqui é só não mandar uma lista impossível.
+  let n = Math.min(grupos.length, slots);
+  while (slots % n !== 0) n++;
+  return Array.from({ length: n }, (_, i) => grupos[i % grupos.length]);
+}
 
-/**
- * Qual grupo criativo deve estar no ar neste instante.
- *
- * A conta é feita a partir do relógio, e não de "quando foi a última troca", de
- * propósito: assim ela não depende de o cron ter rodado, não acumula atraso
- * quando uma volta falha, e duas execuções no mesmo minuto chegam ao mesmo
- * grupo. O registro do plano só guarda o que está no ar (`noAr`) para saber se
- * a troca já foi feita.
- *
- * Uma notícia que entra no meio do dia muda o tamanho da lista e, com ele, o
- * grupo da vez — quem estava no ar pode ceder o lugar antes de fechar a janela.
- * Isso é aceitável e até desejável: a notícia recém-aprovada estreia em minutos
- * em vez de esperar a volta inteira do rodízio.
- */
-export function grupoDaVez(grupos: string[], agora: Date = new Date()): string | undefined {
-  if (!grupos.length) return undefined;
-  const turno = Math.floor(agora.getTime() / (JANELA_RODIZIO_MINUTOS * 60_000));
-  return grupos[turno % grupos.length];
+/** As duas listas descrevem a mesma estratégia? Ordem inclusa. */
+export function mesmaEstrategia(a: string[] | undefined, b: string[]): boolean {
+  return Boolean(a) && a!.length === b.length && a!.every((g, i) => g === b[i]);
 }

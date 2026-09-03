@@ -93,27 +93,28 @@ continua com o seu grupo criativo — é o que passa pela Análise Criativa
 individualmente —, mas os grupos do dia são amarrados na mesma unidade. Alvo e
 frequência são os mesmos do clima.
 
-**A exibição é de 10 segundos, sempre**, com quantas notícias forem. Os grupos
-criativos que ficam juntos na estratégia da unidade tocam **emendados**: em
-01/09/2026 a operação viu no portal a linha do plano com 30s, um dia de quatro
-notícias, enquanto o clima — que tem um grupo criativo só — aparece com os 10s
-de sempre. Por isso a estratégia carrega um grupo por vez, e o rodízio entre as
-notícias do dia é nosso: o cron passa a vez a cada meia hora
-(`JANELA_RODIZIO_MINUTOS`), e cada notícia fica com a sua fatia das 240
-exibições. Com quatro notícias, seis horas de tela para cada uma.
+**A exibição é de 10 segundos, sempre**, com quantas notícias forem. As
+notícias do dia ficam **todas na estratégia da unidade**, e quem reparte as
+exibições entre elas é o Kuma: com quatro notícias, cada uma pega 60 das 240
+exibições do dia, uma notícia por exibição, em todas as janelas. A unidade não
+manda `hours`, então o dia inteiro é elegível.
 
-O grupo da vez é calculado do relógio, não de "quando foi a última troca": uma
-volta do cron que falhe não acumula atraso, e duas execuções no mesmo minuto
-chegam ao mesmo grupo. O plano guarda em `noAr` o que está na estratégia, que é
-como se sabe se a troca já foi feita.
+Houve um rodízio nosso entre 01 e 03/09/2026 — a estratégia carregava um grupo
+por vez e o cron trocava a cada meia hora — porque a linha do plano no portal
+marcou 30s num dia de notícias e a leitura foi que os grupos tocavam emendados.
+Nas telas o resultado foi outro: uma notícia ficava o turno inteiro no ar. Os
+30s eram a soma dos criativos amarrados; o grupo criativo é um anúncio só, com
+um material por tipo de tela (`Creative Interface API`, §2.1 e §2.2), e a
+duração dele não cresce porque a estratégia tem vizinhos. O rodízio saiu, e o
+cron passou a conferir se a estratégia carrega as notícias todas —
+`sincronizarEstrategia`, que conserta sozinho os planos daquela época.
 
 O teto de **quatro notícias por dia** vem de uma exigência da Brato — o número
 de grupos criativos na estratégia precisa dividir `frequency/60`, e a 240
-exibições/dia isso dá quatro. Com o rodízio a exigência deixou de pesar (a
-estratégia leva um grupo só), mas o teto ficou: repartir o dia entre mais
-notícias daria a cada uma um pedaço pequeno demais. A quinta é recusada já no
-envio, antes de gastar índice e material. `durationInSecond` também é campo da
-unidade, então o dia inteiro veicula na mesma duração.
+exibições/dia isso dá quatro. Três notícias não dividem quatro, então a lista
+sobe para quatro repetindo a primeira, que fica com duas fatias. A quinta é
+recusada já no envio, antes de gastar índice e material. `durationInSecond`
+também é campo da unidade, então o dia inteiro veicula na mesma duração.
 
 Antes era uma unidade por notícia, e um dia com quatro virava quatro planos na
 lista do portal, cada um travando as mesmas telas a 240 exibições/dia. Agora os
@@ -122,7 +123,7 @@ lista do portal, cada um travando as mesmas telas a 240 exibições/dia. Agora o
 ```
 src/lib/kuma/newsGroup.ts        grupo criativo em JPG, cinco materiais
 src/lib/kuma/noticiaEstado.ts    registro por envio — a fila de trabalho
-src/lib/kuma/noticiaPlano.ts     o plano do dia, as vagas e o rodízio
+src/lib/kuma/noticiaPlano.ts     o plano do dia, as vagas e a estratégia
 src/lib/kuma/publicarNoticia.ts  a esteira, um passo por chamada
 src/app/api/noticias/publicar/   recebe os JPGs do painel
 src/app/api/noticias/agendar/    o cron que empurra os envios abertos

@@ -290,8 +290,8 @@ export function NewsGenerator() {
           // é o que acontece, e é melhor dizer aqui do que a operação descobrir
           // cronometrando: a exibição é de 10s, uma notícia por vez.
           (enviados.length > 1
-            ? " Depois de aprovadas elas se revezam nas telas, uma por exibição," +
-              " em janelas de meia hora — a exibição continua sendo de 10 segundos."
+            ? " Depois de aprovadas elas dividem as exibições do dia, uma notícia" +
+              " por exibição — a exibição continua sendo de 10 segundos."
             : ""),
         ok: true,
       });

@@ -6,9 +6,9 @@ import { dataEmSaoPaulo } from "@/lib/kuma/agendar";
 import {
   avancarNoticia,
   descreverPasso,
-  rodarRodizio,
+  sincronizarEstrategia,
+  type PassoEstrategia,
   type PassoNoticia,
-  type PassoRodizio,
 } from "@/lib/kuma/publicarNoticia";
 import { PREFIXO_NOTICIAS, type EstadoNoticia } from "@/lib/kuma/noticiaEstado";
 import { lerJson, listar } from "@/lib/server/supabaseUpload";
@@ -134,32 +134,33 @@ export async function GET(req: NextRequest) {
   }
 
   /*
-   * O rodízio do dia, depois dos envios.
+   * A estratégia do dia, depois dos envios.
    *
-   * Ele não pertence a envio nenhum: a estratégia da unidade carrega um grupo
-   * criativo por vez — senão as notícias tocam emendadas e o bloco de 10s cresce
-   * com a quantidade delas — e alguém precisa passar a vez ao longo do dia.
-   * Envio que já está no ar é `terminado` e sai da varredura acima, então sem
-   * este passo a primeira notícia do dia ficaria com o ar até a meia-noite.
+   * Ela não pertence a envio nenhum: a unidade do dia carrega as notícias todas
+   * na estratégia, e envio que já está no ar é `terminado` e sai da varredura
+   * acima. Sem este passo, uma estratégia que ficou para trás — de uma volta que
+   * morreu no meio, ou de um plano do tempo do rodízio — continuaria com menos
+   * notícias no ar do que o plano diz, e ninguém saberia: não existe endpoint
+   * para ler a estratégia de uma unidade.
    *
-   * Só o plano de hoje é revezado. O de ontem tem `startDate` e `endDate` na
-   * data dele e já não exibe nada — trocar a estratégia de um pedido encerrado
-   * seria chamada à toa.
+   * Só o plano de hoje é conferido. O de ontem tem `startDate` e `endDate` na
+   * data dele e já não exibe nada — reescrever a estratégia de um pedido
+   * encerrado seria chamada à toa.
    */
-  let rodizio: PassoRodizio | null = null;
+  let estrategia: PassoEstrategia | null = null;
   try {
-    rodizio = await rodarRodizio(dataEmSaoPaulo(0), { log });
+    estrategia = await sincronizarEstrategia(dataEmSaoPaulo(0), { log });
   } catch (e) {
     const erro = e instanceof Error ? e.message : String(e);
-    console.error(`[noticia/${origem}] rodízio falhou: ${erro}`);
-    falhas.push({ id: `rodizio ${dataEmSaoPaulo(0)}`, erro });
+    console.error(`[noticia/${origem}] estratégia falhou: ${erro}`);
+    falhas.push({ id: `estrategia ${dataEmSaoPaulo(0)}`, erro });
   }
 
   const corpo = {
     ok: falhas.length === 0,
     abertos: passos.length,
     passos,
-    ...(rodizio ? { rodizio } : {}),
+    ...(estrategia ? { estrategia } : {}),
     ...(falhas.length ? { falhas } : {}),
   };
   return Response.json(corpo, { status: falhas.length ? 500 : 200 });

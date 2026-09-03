@@ -10,11 +10,10 @@
  *
  * Cada envio tem seu próprio grupo criativo — é o que passa pela Análise
  * Criativa individualmente —, mas a **unidade é uma por dia**: todos os grupos
- * do mesmo dia são amarrados nela e revezam o ar, um por vez, pelo rodízio que
- * `rodarRodizio` conduz. Um por vez porque os grupos que ficam juntos na
- * estratégia tocam emendados: era o bloco de 30s que a operação viu no portal
- * com quatro notícias no dia. Ver `noticiaPlano.ts` para a medição e para o
- * limite de notícias que a frequência impõe.
+ * do mesmo dia são amarrados nela e ficam juntos na estratégia, e é o Kuma que
+ * reparte as exibições entre eles — uma notícia por exibição, em todas as
+ * janelas do dia. Ver `noticiaPlano.ts` para a evidência disso, para a regra do
+ * padding que a Brato exige e para o limite de notícias por dia.
  */
 
 import {
@@ -41,8 +40,8 @@ import {
 import { montarGrupoNoticia } from "./newsGroup";
 import {
   caminhoPlanoNoticias,
-  grupoDaVez,
-  JANELA_RODIZIO_MINUTOS,
+  gruposParaEstrategia,
+  mesmaEstrategia,
   slotsDaFrequencia,
   type PlanoNoticias,
 } from "./noticiaPlano";
@@ -69,7 +68,7 @@ export type PassoNoticia =
   | { estado: "aguardando-propagacao"; id: string; faltamSegundos: number }
   | { estado: "submetido"; id: string; grupoId: string }
   | { estado: "aguardando-aprovacao"; id: string; grupoId: string; auditoria: string }
-  | { estado: "no-ar"; id: string; unidadeId: string; telas: number; daVez: boolean }
+  | { estado: "no-ar"; id: string; unidadeId: string; telas: number }
   | { estado: "ja-no-ar"; id: string; unidadeId: string }
   | { estado: "parado"; id: string; motivo: string };
 
@@ -82,22 +81,20 @@ async function gravar(estado: EstadoNoticia): Promise<void> {
 }
 
 async function gravarPlano(plano: PlanoNoticias): Promise<void> {
+  // `noAr` é resquício do rodízio que existiu entre 01 e 03/09/2026: um plano
+  // gravado naquela época ainda traz o campo, e o spread de quem edita o
+  // registro o levaria de volta ao arquivo para sempre.
+  const limpo: PlanoNoticias & { noAr?: string } = { ...plano };
+  delete limpo.noAr;
   await uploadPublico({
-    caminho: caminhoPlanoNoticias(plano.data),
-    conteudo: Buffer.from(JSON.stringify(plano, null, 2)),
+    caminho: caminhoPlanoNoticias(limpo.data),
+    conteudo: Buffer.from(JSON.stringify(limpo, null, 2)),
     contentType: "application/json",
   });
 }
 
-/**
- * Onde a notícia foi amarrada, ou o motivo de ela não ter sido.
- *
- * `daVez` diz se ela é o grupo criativo que está na estratégia **agora**. Estar
- * no plano e estar no ar deixaram de ser a mesma coisa quando a estratégia
- * passou a carregar um grupo por vez, e o log da operação precisa distinguir os
- * dois — uma notícia que entrou às 15h e estreia às 15h30 não está com defeito.
- */
-type Amarracao = { unidadeId: string; telas: number; daVez: boolean } | { motivo: string };
+/** Onde a notícia foi amarrada, ou o motivo de ela não ter sido. */
+type Amarracao = { unidadeId: string; telas: number } | { motivo: string };
 
 /**
  * Abre a unidade do dia e amarra nela a primeira notícia.
@@ -161,8 +158,9 @@ async function abrirPlano(
   log(`${id}: unidade ${unidadeId} criada para ${data}`);
 
   // Unidade sem criativo trava inventário e não exibe nada.
+  const estrategia = gruposParaEstrategia([grupoId], frequencia);
   try {
-    await createOrderStrategy(unidadeId, [grupoId], cfg);
+    await createOrderStrategy(unidadeId, estrategia, cfg);
   } catch (e) {
     log(`${id}: amarramento falhou — cancelando a unidade ${unidadeId}`);
     await cancelOrder(unidadeId, cfg).catch((err) =>
@@ -180,7 +178,7 @@ async function abrirPlano(
     ...reserva,
     unidadeId,
     grupos: [grupoId],
-    noAr: grupoId,
+    estrategia,
     telas: travadas,
     atualizadoEm: new Date().toISOString(),
     criandoEm: undefined,
@@ -193,7 +191,7 @@ async function abrirPlano(
    */
   await nomearPlano(unidadeId, data, cfg, log, `${nomeDoPlano(data)} NEWS`);
 
-  return { unidadeId, telas: travadas, daVez: true };
+  return { unidadeId, telas: travadas };
 }
 
 /**
@@ -232,12 +230,11 @@ async function unidadeDoPlano(
 /**
  * Amarra a notícia no plano que o dia já tem.
  *
- * A notícia entra na lista de grupos do plano, e quem decide se ela vai para a
- * estratégia agora é o rodízio: a estratégia carrega **um** grupo por vez, senão
- * as notícias tocam emendadas e o bloco de 10s viraria 20s, 30s, 40s. Se o
- * relógio disser que a vez é dela, a troca acontece aqui mesmo — a notícia
- * recém-aprovada estreia em minutos. Se não, ela fica registrada e espera a
- * volta do rodízio, sem nenhuma chamada ao Kuma.
+ * A notícia entra na lista de grupos do plano e a estratégia é remontada com
+ * todos eles: a chamada substitui a estratégia inteira, então mandar só o grupo
+ * novo tiraria as notícias anteriores do ar. A recém-aprovada estreia em
+ * minutos, e o que muda para as que já estavam no ar é a fatia — as exibições
+ * do dia passam a ser divididas por mais uma.
  *
  * Nenhuma tela é travada aqui: a unidade já reservou as dela quando nasceu, e é
  * justamente isso que o plano compartilhado economiza — antes, quatro notícias
@@ -257,7 +254,7 @@ async function entrarNoPlano(
   // foi gravar o envio. Repetir a chamada não estragaria nada, mas nada mudaria.
   if (plano.grupos.includes(grupoId)) {
     log(`${id}: grupo ${grupoId} já estava no plano ${plano.unidadeId}`);
-    return { unidadeId: plano.unidadeId, telas: plano.telas ?? 0, daVez: plano.noAr === grupoId };
+    return { unidadeId: plano.unidadeId, telas: plano.telas ?? 0 };
   }
 
   if (plano.duracao !== estado.duracao) {
@@ -297,92 +294,87 @@ async function entrarNoPlano(
   await gravarPlano({ ...plano, criandoEm: agora });
   await gravar({ ...estado, criandoEm: agora });
 
-  const daVez = grupoDaVez(grupos) ?? grupoId;
-  let noAr = plano.noAr;
-  if (daVez !== noAr) {
-    try {
-      await createOrderStrategy(plano.unidadeId, [daVez], cfg);
-      noAr = daVez;
-    } catch (e) {
-      /*
-       * Aqui a unidade **não** é cancelada, ao contrário do caminho que a cria:
-       * ela já tem as notícias anteriores no ar, e derrubá-la por causa de uma que
-       * não entrou tiraria as outras junto. A lista fica como estava e o cron
-       * tenta de novo no minuto seguinte.
-       */
-      await gravarPlano({ ...plano, criandoEm: undefined }).catch(() => {});
-      await gravar({ ...estado, criandoEm: undefined }).catch(() => {});
-      throw e;
-    }
+  const estrategia = gruposParaEstrategia(grupos, frequencia);
+  try {
+    await createOrderStrategy(plano.unidadeId, estrategia, cfg);
+  } catch (e) {
+    /*
+     * Aqui a unidade **não** é cancelada, ao contrário do caminho que a cria:
+     * ela já tem as notícias anteriores no ar, e derrubá-la por causa de uma que
+     * não entrou tiraria as outras junto. A lista fica como estava e o cron
+     * tenta de novo no minuto seguinte.
+     */
+    await gravarPlano({ ...plano, criandoEm: undefined }).catch(() => {});
+    await gravar({ ...estado, criandoEm: undefined }).catch(() => {});
+    throw e;
   }
 
   await gravarPlano({
     ...plano,
     grupos,
-    noAr,
+    estrategia,
     telas,
     atualizadoEm: new Date().toISOString(),
     criandoEm: undefined,
   });
   log(
-    `${id}: entrou no plano ${plano.unidadeId} — ${grupos.length} de até ${slots} notícia(s), ` +
-      `${noAr === grupoId ? "já no ar" : `no ar segue ${noAr}`}`,
+    `${id}: entrou no plano ${plano.unidadeId} — ${grupos.length} de até ${slots} notícia(s) ` +
+      `dividindo ${frequencia} exibições/dia`,
   );
 
-  return { unidadeId: plano.unidadeId, telas, daVez: noAr === grupoId };
+  return { unidadeId: plano.unidadeId, telas };
 }
 
-export type PassoRodizio =
-  | { estado: "trocado"; data: string; unidadeId: string; noAr: string; vez: number; de: number }
-  | { estado: "mantido"; data: string; noAr: string; vez: number; de: number }
-  | { estado: "sem-rodizio"; data: string; motivo: string };
+export type PassoEstrategia =
+  | { estado: "reescrita"; data: string; unidadeId: string; noticias: number; vagas: number }
+  | { estado: "em-dia"; data: string; noticias: number }
+  | { estado: "sem-estrategia"; data: string; motivo: string };
 
 /**
- * Passa a vez para a próxima notícia do dia.
+ * Confere se a estratégia da unidade do dia carrega as notícias todas.
  *
- * Esta é a metade do desenho que fica fora do caminho de cada envio: `avancarNoticia`
- * leva a notícia até a unidade, e daí em diante quem decide qual das notícias do
- * dia está no ar é esta função, chamada pelo cron a cada minuto. Ela troca a
- * estratégia quando o relógio virou a janela do rodízio e não faz nada nas
- * outras voltas — a comparação é contra o `noAr` do registro, então o custo de
- * uma volta sem troca é a leitura de um JSON.
+ * Na maioria das voltas ela não faz nada: o registro do plano guarda a lista que
+ * foi mandada no último `createOrderStrategy`, e quando ela bate com a que o
+ * plano pede o custo da volta é a leitura de um JSON. Existe para as situações
+ * em que a estratégia fica para trás do plano sem ninguém perceber, porque o
+ * Kuma não tem endpoint para ler a estratégia de uma unidade:
  *
- * Um plano com uma notícia só também passa por aqui, e de propósito: é o que
- * conserta os planos criados antes do rodízio, que têm a lista inteira de grupos
- * na estratégia e são exatamente os que a operação viu como 30s. A primeira
- * volta reduz a estratégia ao grupo da vez e o plano entra no regime novo.
+ *  - uma volta que morreu entre gravar a lista e mandá-la ao Kuma; e
+ *  - os planos criados enquanto o rodízio existiu (01 a 03/09/2026), que têm um
+ *    grupo só na estratégia e as outras notícias do dia fora do ar. A primeira
+ *    volta reescreve a estratégia com todas e o plano entra no regime certo, sem
+ *    ninguém precisar reenviar notícia nenhuma.
  */
-export async function rodarRodizio(
+export async function sincronizarEstrategia(
   dataISO: string,
   opts: { cfg?: KumaConfig; log?: (m: string) => void } = {},
-): Promise<PassoRodizio> {
+): Promise<PassoEstrategia> {
   const log = opts.log ?? (() => {});
   const plano = await lerJson<PlanoNoticias>(caminhoPlanoNoticias(dataISO));
 
-  if (!plano) return { estado: "sem-rodizio", data: dataISO, motivo: "o dia não tem plano" };
+  if (!plano) return { estado: "sem-estrategia", data: dataISO, motivo: "o dia não tem plano" };
   if (!plano.unidadeId) {
-    return { estado: "sem-rodizio", data: dataISO, motivo: "plano sem unidade ainda" };
+    return { estado: "sem-estrategia", data: dataISO, motivo: "plano sem unidade ainda" };
   }
   if (plano.criandoEm && Date.now() - Date.parse(plano.criandoEm) < LEASE_SEGUNDOS * 1_000) {
-    // Uma notícia está entrando no plano neste instante, e ela também mexe na
-    // estratégia. Duas trocas no mesmo minuto deixariam o registro descrevendo
-    // um grupo e a unidade tocando outro.
-    return { estado: "sem-rodizio", data: dataISO, motivo: "plano em atualização" };
+    // Uma notícia está entrando no plano neste instante, e ela também escreve a
+    // estratégia. Duas escritas no mesmo minuto deixariam o registro descrevendo
+    // uma lista e a unidade tocando outra.
+    return { estado: "sem-estrategia", data: dataISO, motivo: "plano em atualização" };
+  }
+  if (!plano.grupos.length) {
+    return { estado: "sem-estrategia", data: dataISO, motivo: "plano sem grupo criativo" };
   }
 
-  const daVez = grupoDaVez(plano.grupos);
-  if (!daVez) {
-    return { estado: "sem-rodizio", data: dataISO, motivo: "plano sem grupo criativo" };
-  }
-  const vez = plano.grupos.indexOf(daVez) + 1;
-  if (daVez === plano.noAr) {
-    return { estado: "mantido", data: dataISO, noAr: daVez, vez, de: plano.grupos.length };
+  const estrategia = gruposParaEstrategia(plano.grupos, plano.frequencia);
+  if (mesmaEstrategia(plano.estrategia, estrategia)) {
+    return { estado: "em-dia", data: dataISO, noticias: plano.grupos.length };
   }
 
   const conta = process.env.KUMA_BIDDER_NEWS?.trim();
   if (!conta) {
     throw new Error(
-      "KUMA_BIDDER_NEWS não configurada — sem ela o rodízio mexeria na conta do clima.",
+      "KUMA_BIDDER_NEWS não configurada — sem ela a estratégia iria para a conta do clima.",
     );
   }
   const cfg = opts.cfg ?? kumaConfig(conta);
@@ -390,32 +382,31 @@ export async function rodarRodizio(
   const agora = new Date().toISOString();
   await gravarPlano({ ...plano, criandoEm: agora });
   try {
-    await createOrderStrategy(plano.unidadeId, [daVez], cfg);
+    await createOrderStrategy(plano.unidadeId, estrategia, cfg);
   } catch (e) {
-    // O registro volta a descrever o que está no ar de verdade: a troca não
-    // aconteceu, então `noAr` continua sendo o grupo anterior. A volta seguinte
-    // do cron tenta de novo.
+    // O registro volta a descrever o que está no ar de verdade: a escrita não
+    // aconteceu, então `estrategia` continua sendo a lista anterior. A volta
+    // seguinte do cron tenta de novo.
     await gravarPlano({ ...plano, criandoEm: undefined }).catch(() => {});
     throw e;
   }
   await gravarPlano({
     ...plano,
-    noAr: daVez,
+    estrategia,
     atualizadoEm: new Date().toISOString(),
     criandoEm: undefined,
   });
 
   log(
-    `plano de ${dataISO}: a vez agora é do grupo ${daVez} (${vez}ª de ${plano.grupos.length}), ` +
-      `por ${JANELA_RODIZIO_MINUTOS} min`,
+    `plano de ${dataISO}: estratégia reescrita com ${plano.grupos.length} notícia(s) ` +
+      `em ${estrategia.length} vaga(s)`,
   );
   return {
-    estado: "trocado",
+    estado: "reescrita",
     data: dataISO,
     unidadeId: plano.unidadeId,
-    noAr: daVez,
-    vez,
-    de: plano.grupos.length,
+    noticias: plano.grupos.length,
+    vagas: estrategia.length,
   };
 }
 
@@ -568,18 +559,13 @@ export async function avancarNoticia(
     telas: amarracao.telas,
     criandoEm: undefined,
   });
-  log(
-    amarracao.daVez
-      ? `${id}: no ar em ${amarracao.telas} tela(s), plano ${amarracao.unidadeId}`
-      : `${id}: no plano ${amarracao.unidadeId}, ${amarracao.telas} tela(s) — entra no ar na vez dela`,
-  );
+  log(`${id}: no ar em ${amarracao.telas} tela(s), plano ${amarracao.unidadeId}`);
 
   return {
     estado: "no-ar",
     id,
     unidadeId: amarracao.unidadeId,
     telas: amarracao.telas,
-    daVez: amarracao.daVez,
   };
 }
 
@@ -593,9 +579,7 @@ export function descreverPasso(p: PassoNoticia): string {
     case "aguardando-aprovacao":
       return `${p.id}: ${p.auditoria}`;
     case "no-ar":
-      return p.daVez
-        ? `${p.id}: no ar na unidade ${p.unidadeId}, ${p.telas} tela(s)`
-        : `${p.id}: no plano da unidade ${p.unidadeId}, ${p.telas} tela(s), esperando a vez no rodízio`;
+      return `${p.id}: no ar na unidade ${p.unidadeId}, ${p.telas} tela(s)`;
     case "ja-no-ar":
       return `${p.id}: já estava no ar na unidade ${p.unidadeId}`;
     case "parado":
