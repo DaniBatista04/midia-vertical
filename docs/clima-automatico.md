@@ -122,6 +122,44 @@ n8n vigia só o disparo das 23h; o cron de minuto responde 200 com "pendente"
 todos os minutos em que o clima do dia não está aprovado, e ninguém é avisado.
 Hoje quem monitora é o campo, por WhatsApp.
 
+### A divergência entre prédios não nasce do pedido
+
+A queixa dizia "tem prédio certo e prédio errado", e isso não casava com a
+explicação acima: sem unidade no ar, **todas** as telas repetiriam a véspera.
+Medido com `/api/clima/telas`, na unidade `101147_57932` ainda em `SHOW`:
+
+| Prédio | Telas | Na unidade |
+| --- | --- | --- |
+| CONDOMINIO EDIFICIO DONA AMELIA | 3 | 3 |
+| CONDOMÍNIO EDIFÍCIO PACO DE HYGIENOPOLIS | 6 | 6 |
+| CONDOMÍNIO EDIFÍCIO RIVER DRIVE (relatado OK) | 3 | 3 |
+| São Paulo inteira | 8.098 | **8.096** |
+
+As duas telas de fora são do prédio `SALES TEAM`, interno. Os dois condomínios
+que reclamaram e o que estava certo entram na unidade **do mesmo jeito** — o
+pedido não distingue nenhum deles. Em 07/09 foi igual: 8.097 de 8.098, com a
+mesma tela interna de fora.
+
+Ou seja: a divergência é criada **depois** do pedido — no Liberar do portal ou na
+sincronização de cada player, que começa quando a unidade sobe e termina em
+horas diferentes em cada prédio. Não é uma segunda falha, é a cauda da primeira:
+subir 09h36 é o que transforma "atraso" em "alguns sim, outros não". Subindo às
+22h da véspera, cada player teria a noite inteira e a cauda não apareceria.
+
+Dois achados de tabela vieram no mesmo movimento:
+
+- **Unidade encerrada zera `reservedLocationIds`.** Consultar 07/09 devolvia
+  "0 travadas" e as 8.098 telas como fora da unidade — que lê como catástrofe e
+  não é nada. A rota cai para `targetIds` quando a lista vem vazia e diz de qual
+  campo o número saiu.
+- **No catálogo da conta Weather em São Paulo só existem 25" e 32"** — 5.486 e
+  2.612 telas. Não há tela `smart19` nem `smart55`. Ou seja, três dos cinco
+  materiais que o job sobe toda noite (o par do 19" com o logo da Focus Media e
+  a cópia do 55") não tocam em lugar nenhum. Inofensivo, mas cada material extra
+  é mais uma chance de a auditoria reprovar o grupo inteiro com 502 em branco —
+  vale conferir com a Brato antes de mexer, porque o grupo de cinco é o formato
+  que passa hoje.
+
 ## O processo real do time, que define onde a automação para
 
 De `Guia_de_Processos_MURAL_e_KUMA.docx`, e é deliberado: o time opera assim
@@ -384,6 +422,7 @@ src/lib/kuma/weatherGroup.ts    payload, nomenclatura, tradução do feedback
 src/lib/kuma/estado.ts          registro do dia, que liga as duas fases
 src/lib/server/supabaseUpload.ts upload público + leitura autenticada
 src/app/api/clima/publicar/     fase 1 — o gatilho (cron das 23h, painel)
+src/app/api/clima/telas/        quais telas a unidade de um dia alcancou, por predio
 .github/workflows/clima-diario.yml  fase 1 — o runner (precisa de Chromium e ffmpeg)
 docs/api-kuma/ROTAS.md          as 42 rotas
 docs/api-kuma/openapi-brato-v2.json
