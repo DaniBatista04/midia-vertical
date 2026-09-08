@@ -93,12 +93,29 @@ export async function GET(req: NextRequest) {
     }
 
     const pedido = await getOrderDetail(unidadeId, cfg);
-    // `reservedLocationIds` é o que a unidade travou de fato; `targetIds` é o
-    // que ela pediu. Numa unidade recém-criada o primeiro às vezes ainda não
-    // veio, e aí o pedido é a melhor resposta disponível.
+    /*
+     * `reservedLocationIds` é o que a unidade travou de fato e é a resposta
+     * certa enquanto ela está no ar. Só que o Kuma **esvazia essa lista quando
+     * a unidade termina**: consultar o clima de ontem devolve zero travadas e
+     * as 8.098 telas da cidade como "fora da unidade", o que lê exatamente
+     * como a falha catastrófica que não houve. Medido em 08/09/2026, na
+     * unidade `101147_57864` de 07/09, já em `FINISH`.
+     *
+     * Então lista vazia cai para `targetIds`, que é o que a unidade pediu e
+     * continua lá depois do fim — e a resposta diz de qual dos dois campos o
+     * número saiu, para ninguém comparar dia no ar com dia encerrado sem
+     * saber que são medidas diferentes.
+     */
     const naUnidade = new Set<string>();
+    let fonte: "reservedLocationIds" | "targetIds" = "reservedLocationIds";
     for (const item of pedido.orderItems) {
-      for (const id of item.reservedLocationIds ?? item.targetIds ?? []) naUnidade.add(id);
+      for (const id of item.reservedLocationIds ?? []) naUnidade.add(id);
+    }
+    if (!naUnidade.size) {
+      fonte = "targetIds";
+      for (const item of pedido.orderItems) {
+        for (const id of item.targetIds ?? []) naUnidade.add(id);
+      }
     }
 
     const todos = await getBuildings(cidade, cfg);
@@ -158,7 +175,14 @@ export async function GET(req: NextRequest) {
         situacao: pedido.orderStatus,
         periodo: `${pedido.startDate} → ${pedido.endDate}`,
         travadas: naUnidade.size,
+        fonte,
       },
+      aviso:
+        fonte === "targetIds"
+          ? "A unidade não devolveu telas travadas (é o que acontece depois que ela " +
+            "encerra), então a conta usou as telas que ela pediu. Serve para saber o " +
+            "alcance pretendido, não para auditar o que foi travado no dia."
+          : undefined,
       grupoId: registro?.grupoId,
       agendadoEm: registro?.agendadoEm,
       resumo: {
