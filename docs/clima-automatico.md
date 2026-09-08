@@ -86,14 +86,23 @@ da véspera, foi aprovado e a unidade `101147_57932` ficou `SHOW` em **8.097 das
 8.098 telas** da cidade. A queixa não é de cobertura nem de conteúdo: é de
 **horário**.
 
-| Data | Grupo submetido | Unidade criada |
-| --- | --- | --- |
-| 07/09 | 06/09 23h11 | 07/09 **08h30** |
-| 08/09 | 07/09 23h10 | 08/09 **09h36** |
+| Data | Grupo submetido | Aprovado no portal | Unidade criada | Automação levou |
+| --- | --- | --- | --- | --- |
+| 04/09 | 03/09 23h13 | 04/09 08h04 | 04/09 08h04 | 37s |
+| 05/09 | 04/09 23h12 | 05/09 09h15 | 05/09 09h16 | 91s |
+| 07/09 | 06/09 23h11 | 07/09 08h29 | 07/09 08h30 | 101s |
+| 08/09 | 07/09 23h10 | 08/09 **09h35** | 08/09 09h36 | **70s** |
 
-A unidade do dia nasce sempre dentro do próprio dia de veiculação, porque é o
-que a aprovação manual permite: o grupo entra na Análise Criativa às 23h e
-ninguém aprova de madrugada. Da meia-noite até a aprovação não existe unidade
+A coluna que decide é a do meio, e ela é humana. A automação entra com um
+minuto — o cron de minuto acha o grupo aprovado no ciclo seguinte e cria a
+unidade. As dez horas e meia entre o material pronto e a unidade no ar são
+inteiras de espera pela aprovação manual, que só pode acontecer no dia
+seguinte, porque o grupo entra na Análise Criativa às 23h e ninguém aprova de
+madrugada.
+
+(O carimbo da aprovação é o `audit.lastmod` do grupo criativo — o único sinal
+que o Kuma dá de quando alguém apertou "Passar". A rota `/api/clima/telas`
+devolve os três marcos juntos.) Da meia-noite até a aprovação não existe unidade
 de clima no ar, e cada tela segue tocando o último criativo que recebeu — o da
 véspera, com o dia da semana da véspera impresso no cabeçalho. Quem olha às 9h
 vê "segunda-feira" numa terça, e vê em umas telas e não em outras conforme cada
