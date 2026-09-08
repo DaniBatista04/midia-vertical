@@ -1,7 +1,14 @@
 import type { NextRequest } from "next/server";
 
 import { dataEmSaoPaulo, CIDADE_PADRAO } from "@/lib/kuma/agendar";
-import { getBuildings, getOrderDetail, getValidLocations, kumaConfig } from "@/lib/kuma/client";
+import {
+  descreverAuditoria,
+  getBuildings,
+  getCreativeGroup,
+  getOrderDetail,
+  getValidLocations,
+  kumaConfig,
+} from "@/lib/kuma/client";
 import { caminhoEstado, type EstadoDoDia } from "@/lib/kuma/estado";
 import { lerJson } from "@/lib/server/supabaseUpload";
 
@@ -60,6 +67,24 @@ function normalizar(s: string): string {
 /** Quantos prédios por chamada de catálogo. O mesmo lote do agendamento. */
 const PREDIOS_POR_LOTE = 100;
 
+/**
+ * O `lastmod` da auditoria em ISO, no fuso de quem opera.
+ *
+ * É o único carimbo que existe da **aprovação manual**, e é o que fecha a linha
+ * do tempo do dia: submetido às 23h, aprovado às X, unidade criada às Y. Sem
+ * ele a conversa sobre atraso fica entre "o time demorou" e "a automação
+ * demorou", sem ninguém poder mostrar qual foi.
+ *
+ * A API não documenta a unidade do campo, e os dois formatos aparecem em
+ * gateway assim — segundo e milissegundo. Um `lastmod` em segundos lido como
+ * milissegundo cai em 1970, então o corte é pelo tamanho.
+ */
+function carimbo(lastmod: number | undefined): string | undefined {
+  if (!lastmod || !Number.isFinite(lastmod)) return undefined;
+  const ms = lastmod < 1e12 ? lastmod * 1_000 : lastmod;
+  return new Date(ms).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
+}
+
 export async function GET(req: NextRequest) {
   const params = req.nextUrl.searchParams;
   const data = params.get("data") ?? dataEmSaoPaulo(0);
@@ -91,6 +116,15 @@ export async function GET(req: NextRequest) {
         { status: 404 },
       );
     }
+
+    // A auditoria é acessório: se ela falhar, o resto da resposta — que é a
+    // pergunta principal, quais telas foram alcançadas — continua valendo.
+    const auditoria = registro?.grupoId
+      ? await getCreativeGroup(registro.grupoId, cfg).catch((e) => {
+          console.error(`[clima/telas] auditoria de ${registro.grupoId} não veio: ${e}`);
+          return null;
+        })
+      : null;
 
     const pedido = await getOrderDetail(unidadeId, cfg);
     /*
@@ -184,6 +218,20 @@ export async function GET(req: NextRequest) {
             "alcance pretendido, não para auditar o que foi travado no dia."
           : undefined,
       grupoId: registro?.grupoId,
+      /**
+       * A linha do tempo do dia, que é o que se discute quando o card chega
+       * tarde na tela. Os três carimbos vêm de fontes diferentes: os dois das
+       * pontas são nossos (o registro do dia) e o do meio é do Kuma — o único
+       * sinal que existe de quando alguém apertou "Passar" no portal.
+       */
+      linhaDoTempo: auditoria
+        ? {
+            submetido: carimbo(Date.parse(registro?.submetidoEm ?? "")),
+            aprovado: carimbo(auditoria.audit.lastmod),
+            situacaoAuditoria: descreverAuditoria(auditoria.audit.status),
+            unidadeCriada: carimbo(Date.parse(registro?.agendadoEm ?? "")),
+          }
+        : undefined,
       agendadoEm: registro?.agendadoEm,
       resumo: {
         cidade,
