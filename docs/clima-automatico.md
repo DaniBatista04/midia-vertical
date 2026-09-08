@@ -75,6 +75,53 @@ workflow onde fixar isso. Por isso `dataEmSaoPaulo()` calcula com `Intl` e
 o relógio em UTC, São Paulo, Tóquio e Los Angeles, e no caso que quebra de
 verdade (02:30 UTC, que são 23:30 do dia anterior em Brasília).
 
+## Por que a manhã fica com o card da véspera
+
+Investigado em 08/09/2026, depois de dois condomínios reportarem previsão
+"desatualizada, está como segunda-feira" numa terça.
+
+Nada estava errado no material. O card de 08/09 saiu com a data certa
+(`TERÇA-FEIRA, 8 DE SETEMBRO`), o grupo `101147_C20046972` foi submetido 23h10
+da véspera, foi aprovado e a unidade `101147_57932` ficou `SHOW` em **8.097 das
+8.098 telas** da cidade. A queixa não é de cobertura nem de conteúdo: é de
+**horário**.
+
+| Data | Grupo submetido | Unidade criada |
+| --- | --- | --- |
+| 07/09 | 06/09 23h11 | 07/09 **08h30** |
+| 08/09 | 07/09 23h10 | 08/09 **09h36** |
+
+A unidade do dia nasce sempre dentro do próprio dia de veiculação, porque é o
+que a aprovação manual permite: o grupo entra na Análise Criativa às 23h e
+ninguém aprova de madrugada. Da meia-noite até a aprovação não existe unidade
+de clima no ar, e cada tela segue tocando o último criativo que recebeu — o da
+véspera, com o dia da semana da véspera impresso no cabeçalho. Quem olha às 9h
+vê "segunda-feira" numa terça, e vê em umas telas e não em outras conforme cada
+player sincroniza e conforme o time termina o City Lock / Liberar no portal.
+
+**Adiantar a fase 1 não resolve.** A `hourly_forecast` da HG é uma janela de 24h
+a partir de agora e o card precisa das 22:00 do dia seguinte — ou seja, só
+fecha depois das 22h. Render mais cedo devolve card furado, não card mais cedo.
+
+O que sobrou de defeito nosso é o `agendarClima`: `datasCandidatas` já oferecia
+hoje **e amanhã**, mas o laço saía na primeira data com registro, e hoje tem
+registro com unidade praticamente o dia inteiro. Amanhã nunca era processado, e
+a unidade dele só podia nascer depois da meia-noite — quando "amanhã" virava
+"hoje". Corrigido: um "já agendado" é guardado e a varredura continua. Sem
+registro para amanhã a segunda passada não faz chamada nenhuma, então o custo é
+zero no dia a dia.
+
+Isso **não** apaga a janela sozinho: continua faltando alguém aprovar o grupo
+antes da meia-noite. O que muda é que agora existe caminho — aprovar o
+`WEATHER-<amanhã>` na última rodada da noite, ou clicar o link do favorito
+depois de aprovar, põe a unidade de pé com a noite inteira para as telas
+sincronizarem. Sem a correção, aprovar de noite não adiantava nada.
+
+E vale registrar o que não existe: **nenhum alarme cobre a fase 2**. O fluxo do
+n8n vigia só o disparo das 23h; o cron de minuto responde 200 com "pendente"
+todos os minutos em que o clima do dia não está aprovado, e ninguém é avisado.
+Hoje quem monitora é o campo, por WhatsApp.
+
 ## O processo real do time, que define onde a automação para
 
 De `Guia_de_Processos_MURAL_e_KUMA.docx`, e é deliberado: o time opera assim

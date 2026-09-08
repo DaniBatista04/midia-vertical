@@ -574,6 +574,28 @@ export async function agendarClima(opts: OpcoesAgendamento = {}): Promise<Result
   const horas = opts.horas ?? horasDaJanela(process.env.KUMA_CLIMA_JANELA);
 
   const datas = datasCandidatas(opts.data);
+  /**
+   * Um "já agendado" encontrado numa data não encerra a varredura.
+   *
+   * `datasCandidatas` oferece hoje e amanhã justamente para o dia seguinte
+   * poder subir adiantado, mas o laço saía na primeira data com registro — e
+   * hoje tem registro com unidade praticamente o dia inteiro. Resultado: a
+   * data de amanhã nunca era processada, e a unidade dela só nascia depois da
+   * meia-noite, quando "amanhã" virava "hoje".
+   *
+   * Isso é o que mantém o clima do dia fora das telas na primeira metade da
+   * manhã: em 07/09 a unidade foi criada 08h30 e em 08/09 às 09h36, sempre no
+   * próprio dia da veiculação. Até lá cada tela continua tocando o card da
+   * véspera, com o dia da semana da véspera impresso nele — que é a queixa que
+   * chega do campo.
+   *
+   * Guardar o "já agendado" e seguir adiante não custa quase nada: sem registro
+   * para amanhã — o que é o caso do dia inteiro, até a fase 1 rodar — a segunda
+   * passada sai sem nenhuma chamada. O que ela compra é a unidade de amanhã
+   * nascer no minuto em que o grupo dela for aprovado, mesmo que a aprovação
+   * aconteça ainda de noite, e não na manhã seguinte.
+   */
+  let jaAgendado: ResultadoAgendamento | null = null;
   for (const data of datas) {
     const r = await processar(data, {
       cfg,
@@ -585,8 +607,14 @@ export async function agendarClima(opts: OpcoesAgendamento = {}): Promise<Result
       grupo: opts.grupo,
       alvo: opts.alvo,
     });
-    if (r) return r;
+    if (!r) continue;
+    if (r.estado === "ja-agendado") {
+      jaAgendado ??= r;
+      continue;
+    }
+    return r;
   }
+  if (jaAgendado) return jaAgendado;
   log(`nada a agendar em ${datas.join(" nem ")}`);
   return { estado: "sem-registro", datas };
 }
