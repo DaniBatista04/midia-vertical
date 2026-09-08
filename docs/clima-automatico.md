@@ -102,7 +102,50 @@ madrugada.
 
 (O carimbo da aprovação é o `audit.lastmod` do grupo criativo — o único sinal
 que o Kuma dá de quando alguém apertou "Passar". A rota `/api/clima/telas`
-devolve os três marcos juntos.) Da meia-noite até a aprovação não existe unidade
+devolve os três marcos juntos.)
+
+E depois da unidade ainda falta o **Liberar**, que é o que empurra o conteúdo
+para os players — unidade existindo no Kuma não basta. Ele é **diário**, não da
+semana de lançamento; em 08/09/2026 saiu às 10h24:53. A corrente inteira daquele
+dia:
+
+| Hora | O que aconteceu | Intervalo |
+| --- | --- | --- |
+| 07/09 23h10:55 | material pronto e submetido | — |
+| 08/09 09h35:48 | aprovado no portal | +10h25 |
+| 08/09 09h36:58 | unidade no ar, 8.096 telas | +70s |
+| 08/09 10h24:53 | Liberar / sincronização | +48min |
+| 08/09 12h27 | queixa do campo | +2h02 |
+
+Nenhuma etapa isolada é o culpado: o Liberar saiu 48 minutos depois de a unidade
+existir, o que é rápido. O que existe é uma corrente de ~11h30 antes de a
+primeira tela poder receber o card, mais ~2h de propagação player por player —
+e é essa última parte que produz "prédio certo e prédio errado".
+
+### Por que não dá para simplesmente antecipar tudo para a véspera
+
+Porque o material só existe depois das 23h, e ninguém trabalha nessa hora.
+Medido em 08/09/2026 às 14h01, com a chave de produção: o `hourly_forecast` da
+HG devolve **exatamente 24 horas**, de 15:00 de hoje a 14:00 de amanhã. O card
+precisa das 22:00 do dia seguinte, logo o render não pode rodar antes das 22h —
+não é escolha, é o que a fonte de dados permite. E o `forecast` diário, que vem
+com 15 dias, não serve para o card do dia, que é hora a hora.
+
+Então as saídas reais são estas quatro, e a escolha é da operação:
+
+1. **Aceitar e avisar o campo.** O clima do dia entra mid-manhã, sempre. Custa
+   zero e para de tratar como defeito o que é o desenho.
+2. **Antecipar a rotina da manhã.** A aprovação já variou de 08h04 a 09h35 —
+   fixá-la logo na abertura, com o Liberar em seguida, tira uma a duas horas de
+   exposição. Só processo, sem código.
+3. **Aprovar e liberar depois das 23h.** Fecha a janela de verdade: a unidade
+   sobe de noite e os players têm a madrugada. Custa uma tarefa noturna diária,
+   de uns cinco minutos, e é o que a correção do `agendarClima` habilitou.
+4. **Pedir à HG uma janela horária maior.** Com 48h de `hourly_forecast` o
+   render sairia às 15h para o dia seguinte, e aprovação e Liberar caberiam na
+   rodada da tarde — sem trabalho noturno e sem card furado. É a única saída que
+   fecha a janela dentro do horário comercial, e é uma pergunta de plano, não de
+   código. Da meia-noite até a aprovação não existe unidade
 de clima no ar, e cada tela segue tocando o último criativo que recebeu — o da
 véspera, com o dia da semana da véspera impresso no cabeçalho. Quem olha às 9h
 vê "segunda-feira" numa terça, e vê em umas telas e não em outras conforme cada
