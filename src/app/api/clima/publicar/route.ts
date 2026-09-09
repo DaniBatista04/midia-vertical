@@ -221,11 +221,23 @@ async function dispararPracas(
         falhas.map((f) => f.sigla).join(", "),
     );
   }
+  /*
+   * `dryRun`, `modo` e `duracao` continuam no topo porque o alarme do n8n lê
+   * daí — o nó "Ficou em ensaio?" ramifica em `$json.dryRun`. Trocar a forma
+   * da resposta sem manter esses campos deixaria o ensaio passando como
+   * publicação de verdade, silenciosamente.
+   *
+   * `pracas` é o que há de novo, e é o que diz ao alarme **quantos runs**
+   * esperar no GitHub.
+   */
   return Response.json(
     {
       ok: !falhas.length,
       origem,
       data: base.data,
+      modo: base.modo,
+      duracao: base.duracao,
+      dryRun: base.dryRun,
       pracas: resultados,
       acompanhar: `https://github.com/${REPO}/actions/workflows/${WORKFLOW}`,
     },
