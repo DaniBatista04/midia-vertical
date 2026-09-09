@@ -25,14 +25,23 @@ import {
   kumaConfig,
   KumaError,
   renomearPlano,
+  telasTravadas,
   type InventarioRequest,
   type KumaConfig,
 } from "./client";
+import {
+  CIDADE_PADRAO,
+  cidadesConfiguradas,
+  envDaCidade,
+  siglaCidade,
+  sufixoDaCidade,
+} from "./cidades";
 import { caminhoEstado, LEASE_SEGUNDOS, type EstadoDoDia } from "./estado";
 import { lerJson, uploadPublico } from "../server/supabaseUpload";
 
-/** São Paulo. */
-export const CIDADE_PADRAO = "6003";
+// Reexportado porque a rota de telas e a notícia já importavam daqui; o valor
+// mora em `cidades.ts`, que `estado.ts` também precisa ler.
+export { CIDADE_PADRAO, CIDADE_RJ, CIDADE_SP, siglaCidade } from "./cidades";
 
 /**
  * Exibições por dia por tela.
@@ -78,10 +87,16 @@ export function dataEmSaoPaulo(deslocamentoEmDias = 0): string {
  * A ordem é mês/dia, não dia/mês — é como a equipe nomeia hoje (o exemplo que
  * me deram para 19 de agosto foi `08/19`) e como o portal apresenta data. Muda
  * aqui se a convenção mudar; é o único lugar que decide isso.
+ *
+ * Fora de São Paulo o nome ganha a sigla da praça — `09/09 RJ`. São Paulo fica
+ * como está, porque é o nome que a operação já procura na lista, e porque o
+ * Kuma exige nome de plano único na conta: sem a sigla, o clima das duas
+ * cidades no mesmo dia disputaria `09/09` e o segundo cairia no sufixo `(2)`,
+ * que não diz a ninguém de qual praça ele é.
  */
-export function nomeDoPlano(dataISO: string): string {
+export function nomeDoPlano(dataISO: string, cidade: string = CIDADE_PADRAO): string {
   const [, mes, dia] = dataISO.split("-");
-  return `${mes}/${dia}`;
+  return `${mes}/${dia}${sufixoDaCidade(cidade).replace("-", " ")}`;
 }
 
 export type ResultadoAgendamento =
@@ -234,21 +249,45 @@ export async function resolverTelas(
   const lista = (v: string | undefined) =>
     (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 
+  const sigla = siglaCidade(cidade);
+
+  /*
+   * O alvo de uma praça nunca herda a lista de outra.
+   *
+   * `KUMA_CLIMA_PREDIOS` sem sufixo guarda hoje os prédios de São Paulo. Deixar
+   * o Rio cair nela mandaria `buildingId` paulista com `cityId=6200`: pedido
+   * inválido no melhor caso, e no pior um pedido que passa e não alcança tela
+   * nenhuma. Então a variável global só vale para a cidade padrão — ou quando
+   * ela é `CIDADE-INTEIRA`, que não nomeia prédio nenhum e por isso significa a
+   * mesma coisa em qualquer praça.
+   */
+  const doAmbiente = (base: string): string | undefined => {
+    const global = envDaCidade(base, cidade);
+    const especifica = process.env[`${base}_${sigla}`];
+    if (especifica !== undefined && especifica.trim()) return especifica;
+    if (cidade === CIDADE_PADRAO) return global;
+    return global?.trim() === ALVO_CIDADE_INTEIRA ? global : undefined;
+  };
+
   if (!alvo) {
-    const telas = lista(process.env.KUMA_CLIMA_TELAS);
+    const telas = lista(doAmbiente("KUMA_CLIMA_TELAS"));
     if (telas.length) return telas;
   }
 
-  const configurado = alvo ? lista(alvo) : lista(process.env.KUMA_CLIMA_PREDIOS);
+  const configurado = alvo ? lista(alvo) : lista(doAmbiente("KUMA_CLIMA_PREDIOS"));
   if (!configurado.length) {
-    throw new Error("defina KUMA_CLIMA_TELAS ou KUMA_CLIMA_PREDIOS — o alvo do pedido não tem padrão");
+    throw new Error(
+      `defina KUMA_CLIMA_TELAS_${sigla} ou KUMA_CLIMA_PREDIOS_${sigla} — ` +
+        `o alvo do pedido em ${sigla} não tem padrão, e a variável sem sufixo não vale ` +
+        "para outra praça (a não ser CIDADE-INTEIRA, que não nomeia prédio)",
+    );
   }
 
   let predios = configurado;
   if (configurado.length === 1 && configurado[0] === ALVO_CIDADE_INTEIRA) {
     const todos = await getBuildings(cidade);
     predios = todos.map((p) => p.buildingId);
-    log(`cidade ${cidade} inteira: ${predios.length} prédio(s)`);
+    log(`${sigla} inteira: ${predios.length} prédio(s)`);
   }
 
   // Em lotes: com a cidade inteira são centenas de prédios, e mandar tudo numa
@@ -259,7 +298,7 @@ export async function resolverTelas(
     const encontrados = await getValidLocations(cidade, lote);
     locais.push(...encontrados.map((l) => l.locationId));
   }
-  log(`${predios.length} prédio(s) → ${locais.length} tela(s)`);
+  log(`${sigla}: ${predios.length} prédio(s) → ${locais.length} tela(s)`);
   return locais;
 }
 
@@ -360,7 +399,7 @@ async function processar(
   },
 ): Promise<ResultadoAgendamento | null> {
   const { cfg, log, cidade, frequencia, simular, horas, alvo, grupo: grupoEnsaio } = opts;
-  const caminho = caminhoEstado(data);
+  const caminho = caminhoEstado(data, cidade);
   const registro = await lerJson<EstadoDoDia>(caminho);
 
   // Num ensaio com `grupo` explícito pode não existir registro daquele dia, e
@@ -493,11 +532,16 @@ async function processar(
     await gravarEstado(caminho, { ...estado, criandoEm: new Date().toISOString() });
   }
 
+  /*
+   * Um item só, de propósito: a arte do clima muda por praça, e a estratégia
+   * do Kuma amarra o criativo no plano inteiro (ver `createOrder`). Duas
+   * cidades no mesmo pedido exibiriam o card de uma delas nas duas.
+   */
   const unidadeId = await createOrder(
     {
-      cityId: cidade,
-      targetIds: disponiveis,
-      goalLocationNum: disponiveis.length,
+      itens: [
+        { cityId: cidade, targetIds: disponiveis, goalLocationNum: disponiveis.length },
+      ],
       startDate: data,
       endDate: data,
       durationInSecond: estado.duracao,
@@ -529,10 +573,10 @@ async function processar(
   // O plano nasce sem nome útil, e quem opera precisa achá-lo na lista pela
   // data em que aquilo vai ao ar. Falhar aqui não derruba o agendamento: a
   // veiculação já está de pé, e nome errado se conserta no portal.
-  await nomearPlano(unidadeId, data, cfg, log);
+  await nomearPlano(unidadeId, data, cfg, log, nomeDoPlano(data, cidade));
 
   const detalhe = await getOrderDetail(unidadeId, cfg);
-  const travadas = detalhe.orderItems[0]?.reservedLocationIds?.length ?? 0;
+  const travadas = telasTravadas(detalhe);
   log(`unidade ${detalhe.orderStatus} · ${detalhe.startDate} → ${detalhe.endDate} · ${travadas} tela(s)`);
 
   if (ensaio) {
@@ -568,7 +612,9 @@ async function processar(
 export async function agendarClima(opts: OpcoesAgendamento = {}): Promise<ResultadoAgendamento> {
   const cfg = opts.cfg ?? kumaConfig();
   const log = opts.log ?? (() => {});
-  const cidade = opts.cidade ?? process.env.KUMA_CLIMA_CIDADE ?? CIDADE_PADRAO;
+  // `KUMA_CLIMA_CIDADE` pode listar mais de uma praça; aqui vale a primeira.
+  // Quem quer todas chama `agendarClimaCidades`.
+  const cidade = opts.cidade ?? cidadesConfiguradas(process.env.KUMA_CLIMA_CIDADE)[0];
   const frequencia = opts.frequencia ?? Number(process.env.KUMA_CLIMA_FREQUENCIA ?? FREQUENCIA_PADRAO);
   const simular = opts.simular ?? false;
   const horas = opts.horas ?? horasDaJanela(process.env.KUMA_CLIMA_JANELA);
@@ -619,6 +665,57 @@ export async function agendarClima(opts: OpcoesAgendamento = {}): Promise<Result
   return { estado: "sem-registro", datas };
 }
 
+/** O que aconteceu com uma praça, sem deixar a falha dela vazar para a outra. */
+export type ResultadoDaCidade = {
+  cidade: string;
+  sigla: string;
+  resultado?: ResultadoAgendamento;
+  /** Mensagem de erro, quando esta praça falhou. */
+  erro?: string;
+  /** Se o erro é de agendamento (acionável) ou inesperado. */
+  acionavel?: boolean;
+};
+
+/**
+ * Agenda o clima em todas as praças configuradas.
+ *
+ * Cada cidade é um pedido independente — arte diferente, plano diferente,
+ * registro diferente —, e por isso a falha de uma **não** interrompe as outras.
+ * Essa é a razão de existir desta função em vez de um laço no chamador: com
+ * duas praças, "o Rio ficou sem inventário" não pode significar "São Paulo não
+ * foi agendado hoje". O erro de cada praça viaja no resultado dela, e quem
+ * chama decide o que fazer com o conjunto.
+ *
+ * A ordem segue a configuração, e São Paulo vem primeiro no padrão: é a praça
+ * com 8 mil telas, e é ela que a operação sente primeiro se algo travar.
+ */
+export async function agendarClimaCidades(
+  opts: Omit<OpcoesAgendamento, "cidade"> & { cidades?: string[] } = {},
+): Promise<ResultadoDaCidade[]> {
+  const cidades = opts.cidades?.length
+    ? opts.cidades
+    : cidadesConfiguradas(process.env.KUMA_CLIMA_CIDADE);
+  const log = opts.log ?? (() => {});
+
+  const saida: ResultadoDaCidade[] = [];
+  for (const cidade of cidades) {
+    const sigla = siglaCidade(cidade);
+    try {
+      const resultado = await agendarClima({
+        ...opts,
+        cidade,
+        log: (m) => log(`[${sigla}] ${m}`),
+      });
+      saida.push({ cidade, sigla, resultado });
+    } catch (e) {
+      const erro = e instanceof Error ? e.message : String(e);
+      log(`[${sigla}] FALHOU: ${erro}`);
+      saida.push({ cidade, sigla, erro, acionavel: e instanceof AgendamentoError });
+    }
+  }
+  return saida;
+}
+
 /** Uma linha legível para log e para a tela do navegador. */
 export function descreverResultado(r: ResultadoAgendamento): string {
   switch (r.estado) {
@@ -633,4 +730,11 @@ export function descreverResultado(r: ResultadoAgendamento): string {
     case "sem-registro":
       return `Nenhum clima submetido para ${r.datas.join(" nem ")}.`;
   }
+}
+
+/** Uma linha por praça, para o log do cron e para a página do link. */
+export function descreverCidades(rs: ResultadoDaCidade[]): string {
+  return rs
+    .map((r) => `${r.sigla}: ${r.erro ?? descreverResultado(r.resultado!)}`)
+    .join(" · ");
 }

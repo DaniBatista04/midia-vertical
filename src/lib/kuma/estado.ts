@@ -7,6 +7,8 @@
  * O arquivo mora no mesmo bucket dos vídeos, ao lado do material que descreve.
  */
 
+import { CIDADE_PADRAO, sufixoDaCidade } from "./cidades";
+
 export type EstadoDoDia = {
   /** Data de veiculação, `YYYY-MM-DD`. */
   data: string;
@@ -49,6 +51,19 @@ export type EstadoDoDia = {
  */
 export const LEASE_SEGUNDOS = 180;
 
-export function caminhoEstado(dataISO: string): string {
-  return `clima/estado/${dataISO}.json`;
+/**
+ * Onde mora o registro de um dia, por cidade.
+ *
+ * A cidade entra no caminho porque o registro é a única memória entre as duas
+ * fases: a das 23h grava o grupo criativo submetido, a do agendamento lê para
+ * saber o que amarrar. Com duas praças e uma chave só a data, a segunda cidade
+ * sobrescreveria a primeira, e o clima de uma delas sairia do ar sem ninguém
+ * ser avisado — o registro apontaria para o grupo da outra.
+ *
+ * São Paulo mantém o caminho histórico, sem sufixo (ver `sufixoDaCidade`): os
+ * arquivos que já existem no bucket continuam sendo encontrados, e a chegada do
+ * Rio não pode significar um dia sem clima em São Paulo.
+ */
+export function caminhoEstado(dataISO: string, cidade: string = CIDADE_PADRAO): string {
+  return `clima/estado/${dataISO}${sufixoDaCidade(cidade)}.json`;
 }

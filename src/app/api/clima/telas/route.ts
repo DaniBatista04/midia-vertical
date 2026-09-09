@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 
-import { dataEmSaoPaulo, CIDADE_PADRAO } from "@/lib/kuma/agendar";
+import { dataEmSaoPaulo } from "@/lib/kuma/agendar";
+import { cidadesConfiguradas, resolverCidade, siglaCidade } from "@/lib/kuma/cidades";
 import {
   descreverAuditoria,
   getBuildings,
@@ -92,20 +93,33 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: "Data inválida — use YYYY-MM-DD." }, { status: 400 });
   }
   const filtro = params.get("predio")?.trim() || null;
-  const cidade = params.get("cidade") ?? process.env.KUMA_CLIMA_CIDADE ?? CIDADE_PADRAO;
+
+  /*
+   * `?cidade=RJ` ou `?cidade=6200`. Sem o parâmetro vale a primeira praça
+   * configurada — a pergunta desta rota é sobre uma unidade, e unidade é de uma
+   * cidade só.
+   */
+  let cidade: string;
+  try {
+    cidade = resolverCidade(
+      params.get("cidade") ?? cidadesConfiguradas(process.env.KUMA_CLIMA_CIDADE)[0],
+    );
+  } catch (e) {
+    return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 400 });
+  }
 
   try {
     const cfg = kumaConfig();
 
     // A unidade pode vir na URL — serve para conferir um dia cujo registro já
     // foi limpo, ou uma unidade criada à mão no portal.
-    const registro = await lerJson<EstadoDoDia>(caminhoEstado(data));
+    const registro = await lerJson<EstadoDoDia>(caminhoEstado(data, cidade));
     const unidadeId = params.get("unidade") ?? registro?.unidadeId;
     if (!unidadeId) {
       return Response.json(
         {
           error:
-            `Não sei qual é a unidade do clima de ${data}: ` +
+            `Não sei qual é a unidade do clima de ${data} em ${siglaCidade(cidade)}: ` +
             (registro
               ? "o registro do dia existe mas ainda não tem unidade — o criativo não foi agendado."
               : "não existe registro para esta data.") +

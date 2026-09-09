@@ -3,14 +3,15 @@ import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 
 import {
-  AgendamentoError,
-  agendarClima,
+  agendarClimaCidades,
   dataEmSaoPaulo,
   descreverResultado,
   horasDaJanela,
   nomeDoPlano,
   type ResultadoAgendamento,
+  type ResultadoDaCidade,
 } from "@/lib/kuma/agendar";
+import { CIDADE_PADRAO, resolverCidade } from "@/lib/kuma/cidades";
 import { renomearPlano } from "@/lib/kuma/client";
 import { caminhoEstado, type EstadoDoDia } from "@/lib/kuma/estado";
 import { apagar, lerJson } from "@/lib/server/supabaseUpload";
@@ -83,9 +84,13 @@ function pagina(
   detalhe: string,
   cor: string,
   status = 200,
+  linhas: string[] = [],
 ): Response {
   const escapar = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const lista = linhas.length
+    ? `<ul class="pracas">${linhas.map((l) => `<li>${escapar(l)}</li>`).join("")}</ul>`
+    : "";
   return new Response(
     `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -99,8 +104,11 @@ function pagina(
   h1 { margin:0 0 8px; font-size:1.1rem; }
   p { margin:0; }
   .detalhe { margin-top:12px; font-size:.85rem; opacity:.7; }
+  .pracas { margin:12px 0 0; padding-left:1.1rem; font-size:.95rem; }
+  .pracas li + li { margin-top:4px; }
 </style></head><body><div class="cartao">
 <h1>${escapar(titulo)}</h1><p>${escapar(mensagem)}</p>
+${lista}
 <p class="detalhe">${escapar(detalhe)}</p>
 </div></body></html>`,
     { status, headers: { "Content-Type": "text/html; charset=utf-8" } },
@@ -139,6 +147,35 @@ function titulo(r: ResultadoAgendamento): { texto: string; cor: string; detalhe:
   }
 }
 
+/**
+ * Título do conjunto, quando são várias praças.
+ *
+ * A regra é a do pior caso: uma praça que falhou domina o cabeçalho mesmo que a
+ * outra tenha ido bem. Quem abre esta página depois de aprovar no portal
+ * precisa ver "faltou alguma coisa" em vermelho, não um verde que esconde o Rio
+ * sem inventário atrás de um São Paulo agendado.
+ */
+function tituloDoConjunto(rs: ResultadoDaCidade[]): { texto: string; cor: string; detalhe: string } {
+  const comErro = rs.filter((r) => r.erro);
+  if (comErro.length) {
+    return {
+      texto: comErro.length === rs.length ? "Falhou" : "Parcial",
+      cor: "#dc2626",
+      detalhe:
+        comErro.length === rs.length
+          ? "Nada foi agendado. Verifique no portal."
+          : `${comErro.map((r) => r.sigla).join(", ")} não foi agendado; o resto está de pé.`,
+    };
+  }
+  // Sem erro nenhum: se há uma praça só, mantém o texto detalhado de antes.
+  if (rs.length === 1 && rs[0].resultado) return titulo(rs[0].resultado);
+  return {
+    texto: "Agendado",
+    cor: "#16a34a",
+    detalhe: "Uma linha por praça. Já pode configurar no portal.",
+  };
+}
+
 export async function GET(req: NextRequest) {
   const origem = await autorizar(req);
   if (!origem) {
@@ -147,11 +184,28 @@ export async function GET(req: NextRequest) {
 
   const params = req.nextUrl.searchParams;
 
+  /*
+   * `?cidade=RJ` recorta tudo o que esta rota faz para uma praça: o
+   * agendamento, o nome sugerido no renomear e — o que mais importa — qual
+   * registro o `?limpar=` apaga. Sem isso, limpar um dia do Rio apagaria o
+   * registro de São Paulo em silêncio.
+   */
+  let cidadeParam: string | undefined;
+  try {
+    const cru = params.get("cidade");
+    cidadeParam = cru ? resolverCidade(cru) : undefined;
+  } catch (e) {
+    return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 400 });
+  }
+  const cidades = cidadeParam ? [cidadeParam] : undefined;
+
   // Ferramenta de operação: renomear um plano que já existe, para arrumar à mão
   // o que nasceu antes de a automação passar a nomear sozinha.
   const renomear = params.get("renomear");
   if (renomear) {
-    const nome = params.get("nome") ?? nomeDoPlano(params.get("data") ?? dataEmSaoPaulo(0));
+    const nome =
+      params.get("nome") ??
+      nomeDoPlano(params.get("data") ?? dataEmSaoPaulo(0), cidadeParam ?? CIDADE_PADRAO);
     try {
       await renomearPlano(renomear, nome);
       const msg = `Plano ${renomear} renomeado para "${nome}".`;
@@ -177,7 +231,7 @@ export async function GET(req: NextRequest) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(limpar)) {
       return Response.json({ error: "Data inválida — use YYYY-MM-DD." }, { status: 400 });
     }
-    const caminho = caminhoEstado(limpar);
+    const caminho = caminhoEstado(limpar, cidadeParam ?? CIDADE_PADRAO);
     const anterior = await lerJson<EstadoDoDia>(caminho);
     const existia = await apagar(caminho);
     const msg = existia
@@ -207,29 +261,35 @@ export async function GET(req: NextRequest) {
     log: (m: string) => console.log(`[agendar/${origem}] ${m}`),
   };
 
-  try {
-    const resultado = await agendarClima(opcoes);
-    const mensagem = descreverResultado(resultado);
-    console.log(`[agendar/${origem}] ${mensagem}`);
+  /*
+   * Nada de try/catch em volta: `agendarClimaCidades` captura a falha de cada
+   * praça e a devolve no resultado dela, justamente para que o Rio quebrado não
+   * impeça São Paulo de ser agendado. O que resta decidir aqui é o status HTTP.
+   */
+  const cidades_ = await agendarClimaCidades({ ...opcoes, cidades });
+  const linhas = cidades_.map(
+    (r) => `${r.sigla}: ${r.erro ?? descreverResultado(r.resultado!)}`,
+  );
+  const mensagem = linhas.join(" · ");
+  console.log(`[agendar/${origem}] ${mensagem}`);
 
-    if (querHtml(req)) {
-      const t = titulo(resultado);
-      return pagina(t.texto, mensagem, t.detalhe, t.cor);
-    }
-    return Response.json({ ok: true, origem, ...resultado, mensagem });
-  } catch (e) {
-    const mensagem = e instanceof Error ? e.message : String(e);
-    console.error(`[agendar/${origem}] FALHOU: ${mensagem}`);
+  /*
+   * Qualquer praça com erro sai não-2xx, para o cron aparecer como falha no
+   * painel da Vercel mesmo quando a outra foi agendada — sucesso parcial que se
+   * apresenta como 200 é falha que ninguém vê. `409` quando todo erro é
+   * acionável (criativo reprovado, sem inventário), `500` no resto.
+   */
+  const erros = cidades_.filter((r) => r.erro);
+  const status = !erros.length ? 200 : erros.every((r) => r.acionavel) ? 409 : 500;
 
-    // Erro de agendamento é definitivo e acionável (criativo reprovado, sem
-    // inventário); o resto é falha inesperada. Os dois saem não-2xx de
-    // propósito, para o cron aparecer como falha no painel da Vercel.
-    const status = e instanceof AgendamentoError ? 409 : 500;
-    if (querHtml(req)) {
-      return pagina("Falhou", mensagem, "Nada foi agendado. Verifique no portal.", "#dc2626", status);
-    }
-    return Response.json({ ok: false, error: mensagem }, { status });
+  if (querHtml(req)) {
+    const t = tituloDoConjunto(cidades_);
+    const resumo = erros.length
+      ? `${cidades_.length - erros.length} de ${cidades_.length} praça(s) agendada(s).`
+      : mensagem;
+    return pagina(t.texto, resumo, t.detalhe, t.cor, status, cidades_.length > 1 ? linhas : []);
   }
+  return Response.json({ ok: !erros.length, origem, cidades: cidades_, mensagem }, { status });
 }
 
 /** Mesmo comportamento por POST, para quem preferir chamar de script. */

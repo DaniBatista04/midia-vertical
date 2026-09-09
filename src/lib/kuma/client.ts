@@ -325,11 +325,23 @@ export async function inquireSufficientTargets(
   return (dados.targetIds ?? []) as string[];
 }
 
-export type PedidoRequest = {
+/** Uma cidade dentro do pedido. */
+export type PedidoItem = {
   cityId: string;
+  /** IDs de tela (`locationId`). */
   targetIds: string[];
   /** Quantas telas travar. Nunca maior que `targetIds.length`. */
   goalLocationNum: number;
+};
+
+export type PedidoRequest = {
+  /**
+   * Um item por cidade — o Kuma trata `cityId` como chave única da lista.
+   *
+   * Período, duração e frequência são do pedido inteiro e valem para todas as
+   * cidades; o que varia por cidade são as telas e quantas travar.
+   */
+  itens: PedidoItem[];
   startDate: string;
   endDate: string;
   durationInSecond: number;
@@ -339,21 +351,52 @@ export type PedidoRequest = {
 };
 
 /**
- * Cria a unidade. Erros que aparecem aqui e valem reconhecer:
+ * Cria o pedido. Erros que aparecem aqui e valem reconhecer:
  * `-8` inventário insuficiente (frequência alta demais para as telas pedidas),
  * `-6` trava de publicação, `-7` fora do prazo de operação.
+ *
+ * ## O que o id devolvido é, de verdade
+ *
+ * O `orderId` é o id do **plano** — o contrato o descreve como `计划id`, e o
+ * valor bate com o `adCampaignId` de `campaign/get`. Cada `orderItem` vira uma
+ * **unidade** dentro desse plano, e a unidade é de uma cidade só (o `cityId`
+ * dela é string, não lista). Um pedido com duas cidades é, portanto, um plano
+ * com duas unidades.
+ *
+ * Medido em produção em 09/09/2026: um `createOrder` com São Paulo e Rio
+ * devolveu um `orderId`, e `unit/getAll` nesse id trouxe duas unidades, uma por
+ * cidade, com `reservedLocationIds` preenchido nas duas — as telas foram
+ * travadas de fato, nas duas praças, pela mesma chamada.
+ *
+ * Isso decide o desenho de quem chama: `createOrderStrategy` amarra o criativo
+ * no **plano**, então todas as cidades do mesmo pedido exibem os mesmos grupos.
+ * Conteúdo idêntico entre praças (a notícia) cabe num pedido só; conteúdo que
+ * muda por praça (o clima) precisa de um pedido por cidade.
  */
 export async function createOrder(
   req: PedidoRequest,
   cfg: KumaConfig = kumaConfig(),
 ): Promise<string> {
-  const { cityId, targetIds, goalLocationNum, ...resto } = req;
+  const { itens, ...resto } = req;
+  if (!itens.length) {
+    throw new KumaError("createOrder exige ao menos uma cidade.");
+  }
+  // `cityId` é a chave única da lista do lado deles. Repetir não produz erro
+  // que a API explique, e o resultado seria uma das entradas simplesmente
+  // sumindo — melhor recusar aqui, onde dá para dizer o motivo.
+  const cidades = new Set(itens.map((i) => i.cityId));
+  if (cidades.size !== itens.length) {
+    throw new KumaError(
+      `createOrder recebeu cityId repetido (${itens.map((i) => i.cityId).join(", ")}) — ` +
+        "cada cidade entra uma vez só.",
+    );
+  }
   const body = await call<Record<string, unknown>>(cfg, "POST", "/v1/adgroup/createOrder", {
     bidderId: cfg.bidderId,
     productName: KUMA_PRODUCT,
     dsp: false,
     ...resto,
-    orderItems: [{ cityId, targetIds, goalLocationNum }],
+    orderItems: itens,
   }, 1);
   const orderId = (body.orderId ?? (body.data as Record<string, unknown> | undefined)?.orderId) as
     | string
@@ -398,6 +441,18 @@ export type PedidoDetalhe = {
   hasDefaultAdStrategy: boolean;
   orderItems: { cityId: string; goalLocationNum: number; targetIds: string[]; reservedLocationIds?: string[] }[];
 };
+
+/**
+ * Quantas telas o pedido travou, somando todas as cidades.
+ *
+ * Existe porque `orderItems[0]` era o suficiente quando todo pedido tinha uma
+ * cidade só, e deixou de ser: um pedido de notícia com São Paulo e Rio
+ * reportaria apenas as telas paulistas, e o número apareceria menor do que é no
+ * registro do dia e no log de quem opera.
+ */
+export function telasTravadas(detalhe: PedidoDetalhe): number {
+  return detalhe.orderItems.reduce((total, item) => total + (item.reservedLocationIds?.length ?? 0), 0);
+}
 
 /** Consulta a unidade. Só devolve pedido da própria conta. */
 export async function getOrderDetail(

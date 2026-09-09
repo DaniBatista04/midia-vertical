@@ -310,6 +310,35 @@ exibições/dia — 20 segundos para resolver tudo.
 A palavra é por extenso de propósito. `*` seria o óbvio e é exatamente o que um
 shell expande sem avisar; o acidente travaria inventário na cidade inteira.
 
+### Praças
+
+São duas: **São Paulo** (`6003`) e **Rio de Janeiro** (`6200`) — a lista inteira
+da conta, lida de `getAllStandardCities`. `KUMA_CLIMA_CIDADE` aceita uma ou as
+duas (`6003,6200`); sem ela vale São Paulo.
+
+Cada praça pode ter alvo próprio: `KUMA_CLIMA_PREDIOS_RJ` e `KUMA_CLIMA_TELAS_RJ`
+vencem a versão sem sufixo para o Rio. Como o Rio tem poucos prédios,
+`KUMA_CLIMA_PREDIOS_RJ=CIDADE-INTEIRA` é a configuração natural — e ela também
+acompanha sozinha as telas que forem sendo instaladas lá.
+
+As duas linhas de conteúdo tratam a cidade de formas opostas, e isso vem da API:
+`createOrderStrategy` amarra o criativo no **plano**, então todas as cidades de
+um pedido exibem o mesmo material.
+
+- **Notícia** é conteúdo nacional, o mesmo nas duas praças. Vai num pedido só,
+  com um `orderItem` por cidade — um plano, uma aprovação, um grupo criativo.
+  Praça sem inventário no dia simplesmente fica de fora do pedido, sem derrubar
+  a outra.
+- **Clima** tem arte por praça, então é um pedido por cidade: grupo criativo,
+  plano e registro do dia separados. `npm run clima:diario -- --cidade=RJ`
+  renderiza e submete o Rio; sem o argumento, São Paulo.
+
+Fora de São Paulo, a sigla entra nos nomes — o plano vira `09/09 RJ`, o grupo
+`WEATHER-20260909-RJ` e o registro `clima/estado/2026-09-09-RJ.json`. São Paulo
+fica como sempre esteve, sem sufixo: é o nome que a operação já procura no
+portal, e mudar o caminho do registro faria a fase 2 não achar o que a fase 1
+gravou.
+
 Para medir antes de mudar: `?alvo=CIDADE-INTEIRA&simular=true` no link responde
 quantas telas seriam, sem criar nada. `?alvo=` só vale junto de `simular` — quem
 chama a URL não decide onde a veiculação acontece.
@@ -342,6 +371,8 @@ npm run clima:diario -- --indice=2       # reenvia o mesmo dia (ver abaixo)
 | `KUMA_API_KEY` | chave da API, no header `x-api-key` |
 | `KUMA_BIDDER_WEATHER` | conta Weather — ela já existe, não crie outra |
 | `KUMA_CLIMA_TELAS` ou `KUMA_CLIMA_PREDIOS` | alvo do pedido; sem padrão, de propósito |
+| `KUMA_CLIMA_TELAS_RJ` / `KUMA_CLIMA_PREDIOS_RJ` | o mesmo, com recorte por praça; vencem a versão sem sufixo |
+| `KUMA_CLIMA_CIDADE` | `cityId`, ou vários por vírgula (`6003,6200`); padrão `6003` |
 | `CRON_SECRET` | a Vercel manda no `Authorization` do cron; sem ela o cron toma 401 |
 | `CLIMA_TOKEN` | o `?t=` do favorito de quem aprova; sem ela esse caminho fica fechado |
 | `GITHUB_DISPATCH_TOKEN` | token com Actions read/write, para o botão do painel acionar o workflow |

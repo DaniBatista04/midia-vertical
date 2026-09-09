@@ -11,19 +11,24 @@
  *   npm run clima:agendar -- --data=...   um dia específico
  *   npm run clima:agendar -- --simular    faz tudo menos criar e amarrar
  *   npm run clima:agendar -- --janela=16-18   só na janela das 16h às 18h
+ *   npm run clima:agendar -- --cidade=RJ  só o Rio de Janeiro
  *
  * Sair com código 0 sem agendar é normal: significa "ainda não aprovado".
  * Código 1 é problema de verdade — criativo reprovado, inventário insuficiente
  * ou falha de chamada.
  *
  * Variáveis, além das do Kuma:
- *   KUMA_CLIMA_CIDADE     cityId; padrão 6003 (São Paulo)
+ *   KUMA_CLIMA_CIDADE     cityId, ou vários separados por vírgula; padrão 6003
+ *                         (São Paulo). `6003,6200` agenda as duas praças.
  *   KUMA_CLIMA_PREDIOS    buildingIds separados por vírgula, ou
  *   KUMA_CLIMA_TELAS      locationIds separados por vírgula
+ *   KUMA_CLIMA_PREDIOS_RJ  as mesmas, com recorte por praça — vencem a versão
+ *   KUMA_CLIMA_TELAS_RJ    sem sufixo para aquela cidade
  *   KUMA_CLIMA_FREQUENCIA exibições/dia por tela; padrão 240
  */
 
-import { agendarClima, descreverResultado, horasDaJanela } from "../src/lib/kuma/agendar";
+import { agendarClimaCidades, descreverCidades, horasDaJanela } from "../src/lib/kuma/agendar";
+import { resolverCidade } from "../src/lib/kuma/cidades";
 
 const arg = (nome: string): string | undefined =>
   process.argv.find((a) => a.startsWith(`--${nome}=`))?.slice(nome.length + 3);
@@ -33,13 +38,19 @@ function log(mensagem: string) {
 }
 
 async function main() {
-  const resultado = await agendarClima({
+  const cidade = arg("cidade");
+  const resultados = await agendarClimaCidades({
     data: arg("data"),
     simular: process.argv.includes("--simular"),
     horas: horasDaJanela(arg("janela")),
+    cidades: cidade ? [resolverCidade(cidade)] : undefined,
     log,
   });
-  log(descreverResultado(resultado));
+  log(descreverCidades(resultados));
+
+  // Praça que falhou precisa aparecer como falha: o script é usado à mão e em
+  // automação, e sair 0 com o Rio quebrado esconderia o problema nas duas.
+  if (resultados.some((r) => r.erro)) process.exitCode = 1;
 }
 
 main().catch((e) => {

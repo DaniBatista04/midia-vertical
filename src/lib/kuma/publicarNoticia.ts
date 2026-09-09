@@ -26,10 +26,12 @@ import {
   KumaError,
   kumaConfig,
   submitCreativeGroup,
+  telasTravadas,
   type KumaConfig,
+  type PedidoItem,
 } from "./client";
+import { cidadesConfiguradas, siglaCidade } from "./cidades";
 import {
-  CIDADE_PADRAO,
   dataEmSaoPaulo,
   FREQUENCIA_PADRAO,
   inventarioEmLotes,
@@ -109,25 +111,50 @@ async function abrirPlano(
   estado: EstadoNoticia,
   grupoId: string,
   data: string,
-  opts: { cfg: KumaConfig; log: (m: string) => void; cidade: string; frequencia: number },
+  opts: { cfg: KumaConfig; log: (m: string) => void; cidades: string[]; frequencia: number },
 ): Promise<Amarracao> {
-  const { cfg, log, cidade, frequencia } = opts;
+  const { cfg, log, cidades, frequencia } = opts;
   const id = estado.id;
 
-  const telas = await resolverTelas(cidade, log);
-  const disponiveis = await inventarioEmLotes(
-    {
-      cityId: cidade,
-      targetIds: telas,
-      startDate: data,
-      endDate: data,
-      durationInSecond: estado.duracao,
-      frequency: frequencia,
-    },
-    cfg,
-  );
-  log(`${id}: inventário ${disponiveis.length} de ${telas.length} tela(s)`);
-  if (!disponiveis.length) {
+  /*
+   * Todas as praças no mesmo pedido.
+   *
+   * A notícia é conteúdo nacional — o mesmo texto vai a São Paulo e ao Rio —, e
+   * o Kuma amarra o criativo no plano (ver `createOrder`). Então um pedido com
+   * um `orderItem` por cidade resolve as duas com um grupo criativo só, uma
+   * aprovação só e um plano só na lista do portal. Dois pedidos separados
+   * dobrariam tudo isso sem entregar nada diferente nas telas.
+   */
+  const itens: PedidoItem[] = [];
+  for (const cidade of cidades) {
+    const sigla = siglaCidade(cidade);
+    const telas = await resolverTelas(cidade, log);
+    const disponiveis = await inventarioEmLotes(
+      {
+        cityId: cidade,
+        targetIds: telas,
+        startDate: data,
+        endDate: data,
+        durationInSecond: estado.duracao,
+        frequency: frequencia,
+      },
+      cfg,
+    );
+    log(`${id}: ${sigla} inventário ${disponiveis.length} de ${telas.length} tela(s)`);
+    /*
+     * Praça sem inventário sai do pedido em vez de derrubá-lo. O Rio é praça
+     * nova, com telas sendo instaladas: um dia em que ele não tiver inventário
+     * não pode ser um dia sem notícia em São Paulo. Fica registrado no log, e
+     * o pedido segue com quem tem.
+     */
+    if (!disponiveis.length) {
+      log(`${id}: ${sigla} ficou de fora — nenhuma tela com inventário`);
+      continue;
+    }
+    itens.push({ cityId: cidade, targetIds: disponiveis, goalLocationNum: disponiveis.length });
+  }
+
+  if (!itens.length) {
     return { motivo: `nenhuma tela com inventário para ${data} a ${frequencia} exibições/dia` };
   }
 
@@ -145,9 +172,7 @@ async function abrirPlano(
 
   const unidadeId = await createOrder(
     {
-      cityId: cidade,
-      targetIds: disponiveis,
-      goalLocationNum: disponiveis.length,
+      itens,
       startDate: data,
       endDate: data,
       durationInSecond: estado.duracao,
@@ -155,7 +180,9 @@ async function abrirPlano(
     },
     cfg,
   );
-  log(`${id}: unidade ${unidadeId} criada para ${data}`);
+  log(
+    `${id}: plano ${unidadeId} criado para ${data} em ${itens.map((i) => siglaCidade(i.cityId)).join(" + ")}`,
+  );
 
   // Unidade sem criativo trava inventário e não exibe nada.
   const estrategia = gruposParaEstrategia([grupoId], frequencia);
@@ -173,7 +200,7 @@ async function abrirPlano(
   }
 
   const detalhe = await getOrderDetail(unidadeId, cfg);
-  const travadas = detalhe.orderItems[0]?.reservedLocationIds?.length ?? 0;
+  const travadas = telasTravadas(detalhe);
   await gravarPlano({
     ...reserva,
     unidadeId,
@@ -216,7 +243,7 @@ async function unidadeDoPlano(
     return {
       serve: !morta,
       motivo: detalhe.orderStatus.toLowerCase(),
-      telas: detalhe.orderItems[0]?.reservedLocationIds?.length,
+      telas: telasTravadas(detalhe),
     };
   } catch (e) {
     const erro = e instanceof KumaError ? e : null;
@@ -488,7 +515,7 @@ export async function avancarNoticia(
   }
 
   /* ── 4. Entrar no plano do dia ────────────────────────────── */
-  const cidade = process.env.KUMA_CLIMA_CIDADE ?? CIDADE_PADRAO;
+  const cidades = cidadesConfiguradas(process.env.KUMA_CLIMA_CIDADE);
   const frequencia = Number(process.env.KUMA_CLIMA_FREQUENCIA ?? FREQUENCIA_PADRAO);
 
   const emCurso = estado.criandoEm ? Date.parse(estado.criandoEm) : 0;
@@ -542,7 +569,7 @@ export async function avancarNoticia(
       : await abrirPlano(estado, estado.grupoId, dataVeiculacao, {
           cfg,
           log,
-          cidade,
+          cidades,
           frequencia,
         });
 

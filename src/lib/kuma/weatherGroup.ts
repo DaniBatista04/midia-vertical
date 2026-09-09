@@ -16,6 +16,7 @@
  * 32", senão o sistema deles não casa os materiais entre as telas.
  */
 
+import { CIDADE_PADRAO, sufixoDaCidade } from "./cidades";
 import { byteLength, KUMA_FILENAME_MAX_BYTES } from "./filename";
 import type { KumaCreative, KumaCreativeGroupRequest, KumaMaterial } from "./client";
 
@@ -42,6 +43,15 @@ export type WeatherGroupInput = {
   video25: string;
   /** Base pública do app, para montar a URL dos materiais default do 19". */
   baseUrl: string;
+  /**
+   * Praça a que este card pertence, no `cityId` do Kuma.
+   *
+   * Entra no nome do grupo e dos materiais porque o Kuma exige nome único
+   * **entre requisições**, e nome repetido é reprovado com 502 e feedback
+   * vazio. Sem a praça no nome, o clima do Rio e o de São Paulo do mesmo dia
+   * colidiriam — e a reprovação não diria o motivo.
+   */
+  cidade?: string;
 };
 
 /** `YYYYMMDD` no fuso local, sem o desvio de `toISOString()`. */
@@ -57,12 +67,13 @@ export function nomeMaterial(
   tamanho: "25" | "32" | "55" | "19" | "19P",
   indice: number,
   duracao: number,
+  cidade: string = CIDADE_PADRAO,
 ): string {
-  return `WEATHER-${dataCompacta(data)}-${tamanho}-${indice}-${duracao}`;
+  return `WEATHER-${dataCompacta(data)}${sufixoDaCidade(cidade)}-${tamanho}-${indice}-${duracao}`;
 }
 
-export function nomeGrupo(data: Date): string {
-  return `WEATHER-${dataCompacta(data)}`;
+export function nomeGrupo(data: Date, cidade: string = CIDADE_PADRAO): string {
+  return `WEATHER-${dataCompacta(data)}${sufixoDaCidade(cidade)}`;
 }
 
 function material(
@@ -83,9 +94,10 @@ function material(
 }
 
 export function montarGrupoClima(input: WeatherGroupInput): KumaCreativeGroupRequest {
-  const { data, duracao, indice, video32, video25, baseUrl } = input;
+  const { data, duracao, indice, video32, video25, baseUrl, cidade = CIDADE_PADRAO } = input;
   const base = baseUrl.replace(/\/+$/, "");
-  const nome = (t: Parameters<typeof nomeMaterial>[1]) => nomeMaterial(data, t, indice, duracao);
+  const nome = (t: Parameters<typeof nomeMaterial>[1]) =>
+    nomeMaterial(data, t, indice, duracao, cidade);
 
   const creatives: KumaCreative[] = [
     // A ordem dos materiais do 19" importa: índice 0 é a tela de cima.
@@ -103,7 +115,7 @@ export function montarGrupoClima(input: WeatherGroupInput): KumaCreativeGroupReq
     { devicestyle: "smart55", materials: [material(nome("55"), video32, "video/mp4", duracao)] },
   ];
 
-  return { name: nomeGrupo(data), duration: duracao, creatives };
+  return { name: nomeGrupo(data, cidade), duration: duracao, creatives };
 }
 
 /**

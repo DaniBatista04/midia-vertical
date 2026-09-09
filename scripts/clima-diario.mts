@@ -10,6 +10,11 @@
  *
  *   npm run clima:diario -- --dry-run     monta e mostra o payload, sem enviar
  *   npm run clima:diario                  renderiza, sobe e submete
+ *   npm run clima:diario -- --cidade=RJ   o mesmo, para o Rio de Janeiro
+ *
+ * Uma execução é de **uma praça**. O clima tem arte por cidade, e a estratégia
+ * do Kuma amarra o criativo no plano inteiro, então cada cidade tem o seu
+ * grupo, o seu plano e o seu registro do dia. Duas praças são duas execuções.
  *
  * Variáveis necessárias:
  *   APP_URL                    base pública do painel (ex.: https://conteudos.focusmedia.com.br)
@@ -32,6 +37,12 @@ import ffmpegPath from "ffmpeg-static";
 import { chromium, type Browser } from "playwright-core";
 
 import { lerJson, uploadPublico } from "../src/lib/server/supabaseUpload";
+import {
+  CIDADE_PADRAO,
+  resolverCidade,
+  siglaCidade,
+  woeidDaCidade,
+} from "../src/lib/kuma/cidades";
 import { caminhoEstado, type EstadoDoDia } from "../src/lib/kuma/estado";
 
 import {
@@ -62,7 +73,17 @@ const arg = (nome: string): string | undefined => {
 const DURACAO = Number(arg("duracao") ?? 10);
 /** Explícito ganha; sem ele, `indiceDoDia()` decide. */
 const INDICE_EXPLICITO = arg("indice") ? Number(arg("indice")) : null;
-const WOEID = arg("woeid") ?? "455827";
+/**
+ * Praça deste envio, no `cityId` do Kuma. Aceita `--cidade=RJ` ou `--cidade=6200`.
+ *
+ * É ela que decide três coisas ao mesmo tempo: de onde vem a previsão (o
+ * WOEID), como o grupo e os materiais se chamam, e em que arquivo o registro do
+ * dia é gravado. Ficarem juntas é o que impede o pior erro possível aqui —
+ * renderizar o clima de uma cidade e publicá-lo como o da outra.
+ */
+const CIDADE = resolverCidade(arg("cidade") ?? CIDADE_PADRAO);
+/** `--woeid` explícito ainda vence, para ensaio com uma praça fora da lista. */
+const WOEID = arg("woeid") ?? woeidDaCidade(CIDADE)!;
 const MODO = arg("modo") ?? "dia";
 /** Minutos de espera pela auditoria antes de desistir de acompanhar. */
 const ESPERA_AUDITORIA = Number(arg("espera") ?? 15);
@@ -100,7 +121,7 @@ function log(msg: string) {
  */
 async function indiceDoDia(dataISO: string): Promise<number> {
   if (INDICE_EXPLICITO !== null) return INDICE_EXPLICITO;
-  const anterior = await lerJson<EstadoDoDia>(caminhoEstado(dataISO)).catch(() => null);
+  const anterior = await lerJson<EstadoDoDia>(caminhoEstado(dataISO, CIDADE)).catch(() => null);
   return anterior ? anterior.indice + 1 : 1;
 }
 
@@ -254,7 +275,7 @@ async function hospedar(resultado: ResultadoClima, data: Date, indice: number): 
   const urls: Record<string, string> = {};
   for (const f of resultado.formatos) {
     const tamanho = f.h === 2560 ? "25" : "32";
-    const nome = `${nomeMaterial(data, tamanho as "25" | "32", indice, DURACAO)}.mp4`;
+    const nome = `${nomeMaterial(data, tamanho as "25" | "32", indice, DURACAO, CIDADE)}.mp4`;
     let buffer: Uint8Array = Buffer.from(f.base64, "base64");
     if (!CRU) {
       const antes = buffer.byteLength;
@@ -298,7 +319,10 @@ async function main() {
   const data = dataVeiculacao();
   const dataISOprevia = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}-${String(data.getDate()).padStart(2, "0")}`;
   const INDICE = await indiceDoDia(dataISOprevia);
-  log(`clima de ${data.toLocaleDateString("pt-BR")} · ${MODO} · ${DURACAO}s · índice ${INDICE}`);
+  log(
+    `clima de ${data.toLocaleDateString("pt-BR")} · ${siglaCidade(CIDADE)} (woeid ${WOEID}) · ` +
+      `${MODO} · ${DURACAO}s · índice ${INDICE}`,
+  );
 
   if (DRY_RUN) {
     const grupo = montarGrupoClima({
@@ -308,6 +332,7 @@ async function main() {
       video32: "https://exemplo/video-32.mp4",
       video25: "https://exemplo/video-25.mp4",
       baseUrl: ASSETS_URL,
+      cidade: CIDADE,
     });
     console.log(JSON.stringify(grupo, null, 2));
     return;
@@ -328,7 +353,7 @@ async function main() {
     await mkdir(salvarEm, { recursive: true });
     for (const f of resultado.formatos) {
       const tamanho = f.h === 2560 ? "25" : "32";
-      const nome = `${nomeMaterial(data, tamanho as "25" | "32", INDICE, DURACAO)}.mp4`;
+      const nome = `${nomeMaterial(data, tamanho as "25" | "32", INDICE, DURACAO, CIDADE)}.mp4`;
       await writeFile(join(salvarEm, nome), Buffer.from(f.base64, "base64"));
       log(`gravado ${nome} — ${(f.bytes / 1024 / 1024).toFixed(2)} MB`);
     }
@@ -343,6 +368,7 @@ async function main() {
     video25: v25,
     video32: v32,
     baseUrl: APP_URL,
+    cidade: CIDADE,
   });
 
   if (GRACA > 0) {
@@ -370,11 +396,11 @@ async function main() {
     materiais: grupo.creatives.flatMap((c) => c.materials.map((m) => m.filename)),
   };
   await uploadPublico({
-    caminho: caminhoEstado(dataISO),
+    caminho: caminhoEstado(dataISO, CIDADE),
     conteudo: Buffer.from(JSON.stringify(estado, null, 2)),
     contentType: "application/json",
   });
-  log(`estado do dia gravado em ${caminhoEstado(dataISO)}`);
+  log(`estado do dia gravado em ${caminhoEstado(dataISO, CIDADE)}`);
 
   await acompanharAuditoria(enviado.id);
 }
