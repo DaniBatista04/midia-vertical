@@ -105,11 +105,21 @@ export function WeatherGenerator() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data: dataPublicavel, duracao: duration, modo: "dia" }),
       });
-      const corpo = (await r.json()) as { error?: string; acompanhar?: string };
+      const corpo = (await r.json()) as {
+        error?: string;
+        acompanhar?: string;
+        pracas?: { sigla: string; ok: boolean }[];
+      };
       if (!r.ok) throw new Error(corpo.error ?? `HTTP ${r.status}`);
-      toast(`✓ Disparado para ${dataPublicavel.split("-").reverse().join("/")}`, "ok");
+      // Uma execução por praça: o clima tem arte por cidade. Dizer quais
+      // saíram evita o mal-entendido de achar que um disparo cobre as duas.
+      const pracas = (corpo.pracas ?? []).filter((p) => p.ok).map((p) => p.sigla);
+      const onde = pracas.length ? ` · ${pracas.join(" + ")}` : "";
+      toast(`✓ Disparado para ${dataPublicavel.split("-").reverse().join("/")}${onde}`, "ok");
       setStatus({
-        text: `Clima de ${dataPublicavel} em geração — leva ~20 min até aparecer na Análise Criativa`,
+        text:
+          `Clima de ${dataPublicavel}${onde} em geração — ` +
+          "leva ~20 min até aparecer na Análise Criativa",
       });
     } catch (e) {
       toast(`Erro: ${e instanceof Error ? e.message : e}`, "err");

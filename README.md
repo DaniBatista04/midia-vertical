@@ -331,7 +331,9 @@ um pedido exibem o mesmo material.
   a outra.
 - **Clima** tem arte por praça, então é um pedido por cidade: grupo criativo,
   plano e registro do dia separados. `npm run clima:diario -- --cidade=RJ`
-  renderiza e submete o Rio; sem o argumento, São Paulo.
+  renderiza e submete o Rio; sem o argumento, São Paulo. O gatilho das 23h
+  (`/api/clima/publicar`) dispara **uma execução do workflow por praça**, em
+  sequência — dois runners renderizando ao mesmo tempo disputariam o painel.
 
 Fora de São Paulo, a sigla entra nos nomes — o plano vira `09/09 RJ`, o grupo
 `WEATHER-20260909-RJ` e o registro `clima/estado/2026-09-09-RJ.json`. São Paulo

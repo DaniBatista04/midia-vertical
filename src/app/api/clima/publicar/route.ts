@@ -3,6 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 
 import { dataEmSaoPaulo } from "@/lib/kuma/agendar";
+import { cidadesConfiguradas, resolverCidade, siglaCidade } from "@/lib/kuma/cidades";
 import { SESSION_COOKIE, verifySession } from "@/lib/server/session";
 
 export const runtime = "nodejs";
@@ -72,6 +73,12 @@ type Corpo = {
    * de quem está verificando a instalação.
    */
   dryRun?: boolean;
+  /**
+   * Uma praça só (`"RJ"` ou `"6200"`). Sem ela, o botão do painel dispara as
+   * mesmas praças que o cron das 23h — o manual e o automático fazem a mesma
+   * coisa, que é o que evita alguém publicar só metade do clima sem perceber.
+   */
+  cidade?: string;
 };
 
 type Pedido = {
@@ -79,6 +86,8 @@ type Pedido = {
   modo: "dia" | "semana";
   duracao: number;
   dryRun: boolean;
+  /** Praça deste disparo, no `cityId` do Kuma. Uma execução é de uma só. */
+  cidade: string;
 };
 
 function segredoConfere(recebido: string, esperado: string | undefined): boolean {
@@ -109,7 +118,7 @@ function dataForaDoAlcance(data: string): string | null {
 }
 
 async function disparar(pedido: Pedido, origem: "cron" | "painel"): Promise<Response> {
-  const { data, modo, duracao, dryRun } = pedido;
+  const { data, modo, duracao, dryRun, cidade } = pedido;
 
   const token = process.env.GITHUB_DISPATCH_TOKEN;
   if (!token) {
@@ -137,6 +146,9 @@ async function disparar(pedido: Pedido, origem: "cron" | "painel"): Promise<Resp
         ref: "main",
         inputs: {
           data,
+          // A sigla, não o `cityId`: é o que aparece na tela de execução do
+          // Actions, e o script aceita as duas formas.
+          cidade: siglaCidade(cidade),
           modo,
           duracao: String(duracao),
           // Vazio de propósito: o script decide o índice sozinho, subindo um
@@ -160,18 +172,65 @@ async function disparar(pedido: Pedido, origem: "cron" | "painel"): Promise<Resp
   }
 
   console.log(
-    `[publicar/${origem}] workflow disparado para ${data} · ${modo} · ${duracao}s` +
+    `[publicar/${origem}] workflow disparado para ${data} · ${siglaCidade(cidade)} · ${modo} · ${duracao}s` +
       (dryRun ? " · ensaio (não envia nada)" : ""),
   );
   return Response.json({
     ok: true,
     origem,
     data,
+    cidade,
     modo,
     duracao,
     dryRun,
     acompanhar: `https://github.com/${REPO}/actions/workflows/${WORKFLOW}`,
   });
+}
+
+/**
+ * Dispara uma execução por praça.
+ *
+ * São disparos separados porque o clima é uma execução por cidade — arte
+ * diferente, grupo criativo diferente, registro do dia diferente. E são
+ * **sequenciais** de propósito: dois runners renderizando ao mesmo tempo
+ * disputariam o mesmo painel, e o render é a parte cara da noite.
+ *
+ * Uma praça que falhe no disparo não impede a outra de sair. A resposta conta
+ * as duas coisas, e só é `ok` se todas saíram — senão o alarme das 23h veria
+ * verde numa noite em que metade do clima não foi gerada.
+ */
+async function dispararPracas(
+  base: Omit<Pedido, "cidade">,
+  cidades: string[],
+  origem: "cron" | "painel",
+): Promise<Response> {
+  const resultados: { cidade: string; sigla: string; ok: boolean; detalhe?: unknown }[] = [];
+  for (const cidade of cidades) {
+    const r = await disparar({ ...base, cidade }, origem);
+    resultados.push({
+      cidade,
+      sigla: siglaCidade(cidade),
+      ok: r.ok,
+      detalhe: r.ok ? undefined : await r.clone().json().catch(() => null),
+    });
+  }
+  const falhas = resultados.filter((r) => !r.ok);
+  if (falhas.length) {
+    console.error(
+      `[publicar/${origem}] ${falhas.length} de ${cidades.length} praça(s) não dispararam: ` +
+        falhas.map((f) => f.sigla).join(", "),
+    );
+  }
+  return Response.json(
+    {
+      ok: !falhas.length,
+      origem,
+      data: base.data,
+      pracas: resultados,
+      acompanhar: `https://github.com/${REPO}/actions/workflows/${WORKFLOW}`,
+    },
+    { status: falhas.length ? 502 : 200 },
+  );
 }
 
 /**
@@ -213,13 +272,14 @@ export async function GET(req: NextRequest) {
     return Response.json({ error: `Não autenticado — ${motivo}.` }, { status: 401 });
   }
 
-  return disparar(
+  return dispararPracas(
     {
       data: dataEmSaoPaulo(1),
       modo: "dia",
       duracao: 10,
       dryRun: req.nextUrl.searchParams.get("ensaio") === "true",
     },
+    cidadesConfiguradas(process.env.KUMA_CLIMA_CIDADE),
     "cron",
   );
 }
@@ -245,13 +305,23 @@ export async function POST(req: NextRequest) {
   const problema = dataForaDoAlcance(data);
   if (problema) return Response.json({ error: problema }, { status: 400 });
 
-  return disparar(
+  let cidades: string[];
+  try {
+    cidades = corpo.cidade
+      ? [resolverCidade(corpo.cidade)]
+      : cidadesConfiguradas(process.env.KUMA_CLIMA_CIDADE);
+  } catch (e) {
+    return Response.json({ error: e instanceof Error ? e.message : String(e) }, { status: 400 });
+  }
+
+  return dispararPracas(
     {
       data,
       modo: corpo.modo === "semana" ? "semana" : "dia",
       duracao: Number(corpo.duracao ?? 10),
       dryRun: Boolean(corpo.dryRun),
     },
+    cidades,
     "painel",
   );
 }

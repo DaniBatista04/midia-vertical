@@ -23,6 +23,13 @@ on:
         # Vazio deixa o script decidir: ele sobe um quando já existe registro.
         description: "Índice do material. Vazio = o script decide (sobe um a cada reenvio)."
         required: false
+      cidade:
+        # Uma execução é de uma praça só: o clima tem arte por cidade, e a
+        # estratégia do Kuma amarra o criativo no plano inteiro. Duas praças
+        # são dois disparos, e é o que `/api/clima/publicar` faz às 23h.
+        description: "Praça: SP ou RJ. Vazio = SP."
+        required: false
+        default: "SP"
       modo:
         description: "dia ou semana"
         required: false
@@ -90,6 +97,7 @@ jobs:
         run: |
           args=""
           [ -n "${{ inputs.data }}" ]    && args="$args --data=${{ inputs.data }}"
+          [ -n "${{ inputs.cidade }}" ]  && args="$args --cidade=${{ inputs.cidade }}"
           [ -n "${{ inputs.indice }}" ]  && args="$args --indice=${{ inputs.indice }}"
           [ -n "${{ inputs.modo }}" ]    && args="$args --modo=${{ inputs.modo }}"
           [ -n "${{ inputs.duracao }}" ] && args="$args --duracao=${{ inputs.duracao }}"
