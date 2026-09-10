@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell, type ShellStatus } from "@/components/AppShell";
 import { useToast } from "@/components/useToast";
+import { PRACAS, pracaDoWoeid } from "@/lib/kuma/cidades";
 import { kumaFilename } from "@/lib/kuma/filename";
 import { drawFrame, loadLogo } from "@/lib/weather/draw";
 import {
@@ -74,6 +75,9 @@ export function WeatherGenerator() {
   const [status, setStatus] = useState<ShellStatus>({ text: "Pronto" });
 
   const [publicando, setPublicando] = useState(false);
+
+  /** A praça do WOEID no campo, ou undefined se for um WOEID de fora da lista. */
+  const praca = pracaDoWoeid(woeid);
 
   /**
    * Data que o disparo manual vai gerar, ou null quando nenhuma é possível.
@@ -409,6 +413,33 @@ export function WeatherGenerator() {
             placeholder="Ex: PREVISÃO DO TEMPO"
             onChange={(e) => setHeaderText(e.target.value)}
           />
+        </div>
+        {/*
+          O WOEID continua editável — é como se testa uma cidade que não
+          veicula. O select é atalho para as duas praças que veiculam, e o
+          valor dele sai do próprio WOEID em vez de um estado paralelo: assim
+          digitar 455825 na mão mostra "Rio de Janeiro" em vez de deixar a
+          interface dizendo uma praça e a arte sair de outra.
+        */}
+        <div className="field-row">
+          <span className="field-label">Praça</span>
+          <select
+            value={praca?.cityId ?? ""}
+            onChange={(e) => {
+              const escolhida = PRACAS.find((p) => p.cityId === e.target.value);
+              // "Outro" limpa o campo em vez de não fazer nada: quem escolheu
+              // isso vai digitar um WOEID, e o campo cheio da praça anterior
+              // faria o select voltar sozinho para ela.
+              setWoeid(escolhida ? escolhida.woeid : "");
+            }}
+          >
+            {PRACAS.map((p) => (
+              <option key={p.cityId} value={p.cityId}>
+                {p.nome} ({p.sigla})
+              </option>
+            ))}
+            <option value="">Outra — WOEID manual</option>
+          </select>
         </div>
         <div className="field-row">
           <span className="field-label">WOEID</span>

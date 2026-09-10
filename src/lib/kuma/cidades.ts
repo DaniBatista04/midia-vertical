@@ -119,6 +119,36 @@ export function woeidDaCidade(cityId: string): string | undefined {
 }
 
 /**
+ * O nome da cidade por extenso, para quem lê uma tela em vez de um nome de
+ * arquivo. A sigla serve ao Kuma; aqui é o contrário.
+ */
+const NOMES: Record<string, string> = {
+  [CIDADE_SP]: "São Paulo",
+  [CIDADE_RJ]: "Rio de Janeiro",
+};
+
+/**
+ * As praças, com os dois identificadores e o nome, na ordem em que aparecem
+ * para quem opera.
+ *
+ * Existe para o painel poder oferecer "São Paulo" e "Rio de Janeiro" sem
+ * reescrever os WOEIDs num segundo lugar — que é exatamente a divergência que
+ * `WOEIDS` foi posto aqui para impedir. Um WOEID digitado à mão na interface
+ * segue valendo; a lista é atalho, não trava.
+ */
+export const PRACAS = Object.entries(WOEIDS).map(([cityId, woeid]) => ({
+  cityId,
+  woeid,
+  sigla: siglaCidade(cityId),
+  nome: NOMES[cityId] ?? siglaCidade(cityId),
+}));
+
+/** A praça de um WOEID, ou `undefined` se for um WOEID de fora da lista. */
+export function pracaDoWoeid(woeid: string): (typeof PRACAS)[number] | undefined {
+  return PRACAS.find((p) => p.woeid === woeid.trim());
+}
+
+/**
  * Aceita o que uma pessoa digita na linha de comando: `RJ`, `rj`, ou o `6200`.
  *
  * Sigla desconhecida vira erro em vez de passar adiante: `--cidade=RG` seguir
