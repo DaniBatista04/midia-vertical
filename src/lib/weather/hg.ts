@@ -75,6 +75,64 @@ export function quandoVoltaAFuncionar(agora = new Date()): string {
   return "agora — se falhou, a HG está sem as horas publicadas";
 }
 
+/**
+ * Uma janela de 24h saudável, começando agora, cobriria os oito horários da data?
+ *
+ * É o que separa as duas causas de card incompleto, e elas pedem reações
+ * opostas: se a resposta é sim, a janela deveria alcançar e não alcançou —
+ * a HG está sem publicar as horas, e tentar de novo em alguns minutos resolve
+ * (foi o caso de 29/08/2026). Se é não, nenhuma espera resolve, porque a
+ * janela avança uma hora por hora e o fim do dia pedido está longe demais:
+ * o que está errado é o horário do disparo.
+ *
+ * Em 10/09/2026 um disparo às 09h29 pediu o card do dia seguinte e o job
+ * gastou 10 minutos "esperando pela HG publicar as horas" antes de desistir —
+ * diagnóstico que o próprio log desmentia, já que a janela vinha com 24h
+ * cheias. Daí esta função existir em vez de o script ler o texto do erro.
+ *
+ * Usa a mesma tolerância de 2h do card (ver `buildDaySlots`), presa ao dia:
+ * o alvo das 22h fecha com a hora das 20h, e é por isso que amanhã passa a
+ * ser possível já às 20h, não às 22h.
+ */
+export function janelaAlcanca(dateStr: string, agora = new Date()): boolean {
+  const inicio = new Date(agora);
+  inicio.setMinutes(0, 0, 0);
+  inicio.setHours(inicio.getHours() + 1); // a HG começa na próxima hora cheia
+  const fim = new Date(inicio);
+  fim.setHours(fim.getHours() + 23); // 24 slots, contando o primeiro
+
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return TARGET_HOURS.every((h) => {
+    const cedo = new Date(y, m - 1, d, Math.max(0, h - 2));
+    const tarde = new Date(y, m - 1, d, Math.min(23, h + 2));
+    return cedo <= fim && tarde >= inicio; // as duas faixas se cruzam?
+  });
+}
+
+/**
+ * A partir de que hora a janela passa a alcançar a data, ou `null` se não passa mais.
+ *
+ * `quandoVoltaAFuncionar` responde isso em texto para quem opera, mas só
+ * raciocina sobre hoje e amanhã: para uma data mais distante ela diria "agora",
+ * que é o contrário da verdade. Aqui a conta é exata para qualquer data, porque
+ * pergunta à própria `janelaAlcanca` hora a hora.
+ *
+ * A busca vai até o fim do dia pedido, e é isso que dá sentido único ao `null`:
+ * a janela desse dia já passou. Um horizonte fixo de algumas horas confundiria
+ * os dois casos opostos — data distante, que ainda vai ser possível na véspera,
+ * e data cuja manhã a janela móvel já deixou atrás.
+ */
+export function quandoJanelaAlcanca(dateStr: string, agora = new Date()): Date | null {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const limite = new Date(y, m - 1, d, 23);
+  const t = new Date(agora);
+  t.setMinutes(0, 0, 0);
+  for (; t <= limite; t.setHours(t.getHours() + 1)) {
+    if (janelaAlcanca(dateStr, t)) return new Date(t);
+  }
+  return null;
+}
+
 type HgResults = Record<string, unknown> & { city?: string };
 
 async function fetchHg(woeid: string, hourly: boolean): Promise<HgResults> {

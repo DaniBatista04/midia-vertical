@@ -52,7 +52,12 @@ import {
   submitCreativeGroup,
 } from "../src/lib/kuma/client";
 import { montarGrupoClima, nomeMaterial, traduzirFeedback } from "../src/lib/kuma/weatherGroup";
-import { ERRO_PREVISAO_INCOMPLETA } from "../src/lib/weather/hg";
+import {
+  ERRO_PREVISAO_INCOMPLETA,
+  janelaAlcanca,
+  quandoJanelaAlcanca,
+} from "../src/lib/weather/hg";
+import { toLocalISODate } from "../src/lib/weather/spec";
 import type { ResultadoClima } from "../src/components/weather/AutoRenderer";
 
 const APP_URL = (process.env.APP_URL ?? "").replace(/\/+$/, "");
@@ -107,8 +112,18 @@ const PREFIXO = arg("prefixo") ?? "";
 /** `--cru` sobe o MP4 do browser sem passar pelo ffmpeg. Ver `normalizar()`. */
 const CRU = process.argv.includes("--cru");
 
+/**
+ * Uma linha de log, com a hora do mesmo relógio que a lógica usa.
+ *
+ * Era `toISOString()`, ou seja UTC, enquanto o job roda com
+ * `TZ=America/Sao_Paulo` e todo o raciocínio de janela horária é em hora de
+ * Brasília. Em 10/09/2026 isso fez um disparo das 09h29 aparecer no log como
+ * 12h30 e a falha parecer ter acontecido no meio do dia, quando o horário era
+ * exatamente a causa dela.
+ */
 function log(msg: string) {
-  console.log(`[clima] ${new Date().toISOString().slice(11, 19)} ${msg}`);
+  const hora = new Date().toLocaleTimeString("pt-BR", { hour12: false });
+  console.log(`[clima] ${hora} ${msg}`);
 }
 
 /**
@@ -135,6 +150,11 @@ function dataVeiculacao(): Date {
   const d = new Date();
   d.setDate(d.getDate() + 1);
   return d;
+}
+
+/** A data de veiculação em YYYY-MM-DD, pelo calendário local. */
+function dataVeiculacaoISO(): string {
+  return toLocalISODate(dataVeiculacao());
 }
 
 /** Faz login no painel e devolve o cookie de sessão. */
@@ -173,7 +193,7 @@ async function renderizar(cookie: string): Promise<ResultadoClima> {
       woeid: WOEID,
       modo: MODO,
       duracao: String(DURACAO),
-      data: dataVeiculacao().toISOString().slice(0, 10),
+      data: dataVeiculacaoISO(),
     });
     log(`abrindo /clima/auto?${params}`);
     await page.goto(`${APP_URL}/clima/auto?${params}`, { waitUntil: "networkidle", timeout: 60_000 });
@@ -198,6 +218,14 @@ async function renderizar(cookie: string): Promise<ResultadoClima> {
  * não o horário do disparo. É falha que passa sozinha: esperar alguns minutos
  * e pedir de novo custa muito menos que um dia sem clima na tela.
  *
+ * Mas só passa sozinha quando a janela deveria alcançar a data, e é o que
+ * `janelaAlcanca` responde. Fora disso a espera é encenação: em 10/09/2026 um
+ * disparo às 09h29 pediu o card do dia seguinte, cuja noite a janela móvel de
+ * 24h não alcança de manhã nenhuma, e o job gastou 10 minutos anunciando que
+ * esperava "pela HG publicar as horas" antes de desistir — com a janela vinda
+ * cheia, de 24h, no próprio log. Aqui isso falha na primeira tentativa, e
+ * dizendo a partir de que hora o card é possível.
+ *
  * Só este erro é repetido. Qualquer outra falha do render sobe na hora — não
  * adianta gastar quinze minutos do job repetindo o que não vai mudar.
  */
@@ -209,6 +237,19 @@ async function renderizarComEspera(cookie: string): Promise<ResultadoClima> {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       if (restam <= 0 || !msg.includes(ERRO_PREVISAO_INCOMPLETA)) throw e;
+      const dia = dataVeiculacaoISO();
+      if (!janelaAlcanca(dia)) {
+        const volta = quandoJanelaAlcanca(dia);
+        const saida = volta
+          ? `o card fica possível a partir das ` +
+            `${volta.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} ` +
+            `de ${volta.toLocaleDateString("pt-BR")}`
+          : `e não fica: a janela da HG já passou das primeiras horas de ${dia}`;
+        throw new Error(
+          `${msg}\n  Não é a HG atrasada: nem uma janela de 24h cheia a partir de agora ` +
+            `alcança os oito horários de ${dia}. Esperar não resolve — ${saida}.`,
+        );
+      }
       log(msg);
       log(`esperando ${ESPERA_HG} min pela HG publicar as horas (restam ${restam} tentativas)`);
       await new Promise((r) => setTimeout(r, ESPERA_HG * 60_000));
@@ -317,7 +358,7 @@ async function acompanharAuditoria(id: string) {
 async function main() {
   if (!APP_URL) throw new Error("APP_URL não definida");
   const data = dataVeiculacao();
-  const dataISOprevia = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}-${String(data.getDate()).padStart(2, "0")}`;
+  const dataISOprevia = dataVeiculacaoISO();
   const INDICE = await indiceDoDia(dataISOprevia);
   log(
     `clima de ${data.toLocaleDateString("pt-BR")} · ${siglaCidade(CIDADE)} (woeid ${WOEID}) · ` +
@@ -344,7 +385,7 @@ async function main() {
   const salvarEm = arg("salvar");
   const cfg = salvarEm ? null : kumaConfig();
 
-  const dataISO = `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}-${String(data.getDate()).padStart(2, "0")}`;
+  const dataISO = dataVeiculacaoISO();
   const cookie = await login();
   const resultado = await renderizarComEspera(cookie);
   log(`renderizado: ${resultado.cidade} · ${resultado.codec}${resultado.convertido ? " + conversão H.265" : ""}`);
