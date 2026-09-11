@@ -22,6 +22,10 @@ import { SESSION_COOKIE, verifySession } from "@/lib/server/session";
  * `/api/clima/publicar` entrou pelo mesmo motivo, quando o cron das 23h saiu do
  * `schedule:` do GitHub Actions e veio para cá. Também não fica aberta: o `GET`
  * exige `CRON_SECRET` e o `POST` do painel confere a sessão por conta própria.
+ *
+ * `/api/clima/status` é o outro lado do mesmo fluxo: quem disparou às 23h volta
+ * uma hora depois para saber como os runs terminaram, e volta sem cookie, pelo
+ * mesmo `Bearer` que usou no disparo.
  */
 const PUBLIC_PATHS = new Set([
   "/login",
@@ -30,6 +34,7 @@ const PUBLIC_PATHS = new Set([
   "/api/health",
   "/api/clima/agendar",
   "/api/clima/publicar",
+  "/api/clima/status",
   "/api/noticias/agendar",
 ]);
 

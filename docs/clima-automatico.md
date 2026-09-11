@@ -439,9 +439,24 @@ caminho até aqui passa por três camadas que tratam byte alto de jeitos
 diferentes. Adivinhável também não: esta rota gasta vinte minutos de runner e
 deixa grupo criativo para alguém aprovar, e não tem limite de tentativas.
 
-O nó que lê o run **não** precisa de credencial: o repositório é público e a API
-de runs do GitHub responde anônima (60 requisições por hora por IP, contra uma
-por dia deste fluxo).
+O nó que lê o run usa **a mesma credencial** do que dispara, porque desde
+11/09/2026 ele não fala mais com o GitHub: pergunta a `/api/clima/status`, que
+consulta autenticada com o `GITHUB_DISPATCH_TOKEN` que o servidor já tem.
+
+Ele falava. O repositório é público e a API de runs responde anônima — mas com o
+orçamento anônimo de **60 requisições por hora por IP**, e o IP é o de saída da
+instância do n8n, dividido com quem mais estiver hospedado lá. Em 11/09/2026 a
+consulta tomou `403 API rate limit exceeded` tendo gasto duas requisições na
+noite: o teto foi consumido por vizinhos. A conta "uma por dia contra 60 por
+hora" estava certa sobre o nosso consumo e errada sobre o orçamento, que nunca
+foi nosso. E o erro depende do movimento de terceiros, então não aparece em
+teste — aparece na madrugada, que é quando o alarme é a única coisa olhando.
+
+Autenticada a cota é de 5000/h, e não custou segredo novo: o token que dispara o
+workflow tem `actions: write`, que inclui ler. A alternativa era um PAT do GitHub
+guardado no n8n, um segundo segredo numa instância onde a credencial errada já
+foi amarrada num nó uma vez — o fluxo com **uma** credencial vale mais que a
+rota economizada.
 
 ---
 
@@ -474,6 +489,7 @@ src/lib/kuma/weatherGroup.ts    payload, nomenclatura, tradução do feedback
 src/lib/kuma/estado.ts          registro do dia, que liga as duas fases
 src/lib/server/supabaseUpload.ts upload público + leitura autenticada
 src/app/api/clima/publicar/     fase 1 — o gatilho (cron das 23h, painel)
+src/app/api/clima/status/       como os runs terminaram, para o alarme do n8n
 src/app/api/clima/telas/        quais telas a unidade de um dia alcancou, por predio
 .github/workflows/clima-diario.yml  fase 1 — o runner (precisa de Chromium e ffmpeg)
 docs/api-kuma/ROTAS.md          as 42 rotas
