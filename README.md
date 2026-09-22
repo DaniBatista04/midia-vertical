@@ -109,12 +109,31 @@ duração dele não cresce porque a estratégia tem vizinhos. O rodízio saiu, e
 cron passou a conferir se a estratégia carrega as notícias todas —
 `sincronizarEstrategia`, que conserta sozinho os planos daquela época.
 
-O teto de **quatro notícias por dia** vem de uma exigência da Brato — o número
-de grupos criativos na estratégia precisa dividir `frequency/60`, e a 240
+O teto de **quatro notícias por estratégia** vem de uma exigência da Brato — o
+número de grupos criativos precisa dividir `frequency/60`, e a 240
 exibições/dia isso dá quatro. Três notícias não dividem quatro, então a lista
-sobe para quatro repetindo a primeira, que fica com duas fatias. A quinta é
-recusada já no envio, antes de gastar índice e material. `durationInSecond`
-também é campo da unidade, então o dia inteiro veicula na mesma duração.
+sobe para quatro repetindo a primeira, que fica com duas fatias.
+`durationInSecond` também é campo da unidade, então o dia inteiro veicula na
+mesma duração.
+
+### Caixas: mais de quatro notícias no dia
+
+Para passar de quatro, o dia se divide em **caixas** de até quatro notícias,
+cada uma com a sua janela — oito notícias viram duas caixas, a primeira até as
+16h e a segunda depois. São até quatro caixas, e a divisão do dia vai das 6h à
+meia-noite, com os cortes em hora par. A **Programação do dia**, embaixo dos
+previews, mostra a linha do tempo e as caixas: marcar notícia na fila enche a
+primeira caixa com vaga (e abre a seguinte), dá para arrastar notícia entre
+caixas e arrastar o divisor para mudar o horário da troca.
+
+A unidade continua **uma por dia**. A API não tem estratégia por hora, então
+quem vira a caixa é o cron de minuto: `sincronizarEstrategia` confere qual caixa
+a hora pede e reescreve a estratégia quando ela muda. A troca chega à tela na
+virada da faixa de programação do Kuma, não no minuto da chamada — foi o que o
+rodízio de setembro mostrou. Caixa da hora sem notícia aprovada não deixa a tela
+vazia: fica no ar a anterior mais próxima (ou a primeira seguinte). Os horários
+moram em `noticias/grade/<data>.json`, gravados no envio; plano de antes das
+caixas é um dia de uma caixa só. Ver `noticiaCaixas.ts`.
 
 Antes era uma unidade por notícia, e um dia com quatro virava quatro planos na
 lista do portal, cada um travando as mesmas telas a 240 exibições/dia. Agora os
@@ -123,6 +142,7 @@ lista do portal, cada um travando as mesmas telas a 240 exibições/dia. Agora o
 ```
 src/lib/kuma/newsGroup.ts        grupo criativo em JPG, cinco materiais
 src/lib/kuma/noticiaEstado.ts    registro por envio — a fila de trabalho
+src/lib/kuma/noticiaCaixas.ts    caixas do dia: janelas, cortes, a caixa da hora
 src/lib/kuma/noticiaPlano.ts     o plano do dia, as vagas e a estratégia
 src/lib/kuma/publicarNoticia.ts  a esteira, um passo por chamada
 src/app/api/noticias/publicar/   recebe os JPGs do painel

@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppShell, type ShellStatus } from "@/components/AppShell";
 import { useToast } from "@/components/useToast";
+import type { DiaNoticias } from "@/app/api/noticias/dia/route";
+import { NewsBoxes } from "@/components/news/NewsBoxes";
 import { kumaFilename } from "@/lib/kuma/filename";
+import { ajustarCortes, cortesPadrao, MAX_CAIXAS } from "@/lib/kuma/noticiaCaixas";
 import { drawCard, proxiedImage, renderJpeg, type TitleFit } from "@/lib/news/draw";
 import { parseFeed } from "@/lib/news/feed";
 import {
@@ -36,6 +39,14 @@ export function NewsGenerator() {
   const [dims, setDims] = useState<[Dim, Dim]>([null, null]);
   const [jpgSize, setJpgSize] = useState("—");
 
+  /* Programação do dia: o que já foi enviado hoje e onde cai o que está na fila. */
+  const [dia, setDia] = useState<DiaNoticias | null>(null);
+  const [carregandoDia, setCarregandoDia] = useState(false);
+  /** Caixa escolhida à mão (arrastando) para uma notícia da fila. */
+  const [escolhidas, setEscolhidas] = useState<Map<number, number>>(new Map());
+  const [caixasManual, setCaixasManual] = useState(1);
+  const [cortesLocal, setCortesLocal] = useState<number[] | null>(null);
+
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([null, null]);
 
   const selected = selIdx !== null ? items[selIdx] : undefined;
@@ -63,6 +74,116 @@ export function NewsGenerator() {
     })();
     return () => { alive = false; };
   }, []);
+
+  /* ── Programação do dia ──────────────────────────────────── */
+  const carregarDia = useCallback(async () => {
+    const d = await lerDia();
+    if (d) setDia(d);
+    setCarregandoDia(false);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const tick = async () => {
+      const d = await lerDia();
+      if (alive && d) setDia(d);
+    };
+    void tick();
+    const t = setInterval(() => void tick(), 60_000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+
+  const vagas = dia?.vagas ?? 4;
+  const enviadosPorCaixa = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const e of dia?.envios ?? []) {
+      if (e.etapa !== "parado") m.set(e.caixa, (m.get(e.caixa) ?? 0) + 1);
+    }
+    return m;
+  }, [dia]);
+
+  /*
+   * Toda notícia marcada ganha caixa: a que o operador arrastou, se ainda tiver
+   * vaga, e senão a primeira com vaga, contando o que já foi enviado hoje. Encher
+   * a última caixa abre a próxima sozinho, que é o "marquei oito, virou duas
+   * caixas". Notícia marcada com as caixas todas cheias fica sem caixa, e não
+   * vai no envio.
+   */
+  const alocacao = useMemo(() => {
+    const m = new Map<number, number>();
+    const ocupadas = (c: number) =>
+      (enviadosPorCaixa.get(c) ?? 0) + [...m.values()].filter((x) => x === c).length;
+    const fila = [...queue].sort((a, b) => a - b);
+    for (const i of fila) {
+      const c = escolhidas.get(i);
+      if (c !== undefined && ocupadas(c) < vagas) m.set(i, c);
+    }
+    for (const i of fila) {
+      if (m.has(i)) continue;
+      for (let c = 1; c <= MAX_CAIXAS; c++) {
+        if (ocupadas(c) < vagas) {
+          m.set(i, c);
+          break;
+        }
+      }
+    }
+    return m;
+  }, [queue, escolhidas, enviadosPorCaixa, vagas]);
+
+  const caixas = Math.max(
+    1,
+    caixasManual,
+    ...enviadosPorCaixa.keys(),
+    ...alocacao.values(),
+  );
+  const cortes = ajustarCortes(cortesLocal ?? dia?.cortesGravados ?? cortesPadrao(caixas), caixas);
+  const horariosPendentes =
+    cortesLocal !== null && JSON.stringify(cortes) !== JSON.stringify(dia?.cortes ?? []);
+  const semVaga = queue.size - alocacao.size;
+
+  const moverParaCaixa = (item: number, caixa: number, trocarCom?: number) => {
+    const de = alocacao.get(item);
+    if (de === undefined || de === caixa) return;
+    // Fixa a caixa de toda a fila, e não só da que mudou: senão a que foi
+    // alocada sozinha poderia pular para a vaga que acabou de abrir.
+    const next = new Map(alocacao);
+    const ocupadas =
+      (enviadosPorCaixa.get(caixa) ?? 0) + [...alocacao.values()].filter((x) => x === caixa).length;
+    if (ocupadas < vagas) {
+      next.set(item, caixa);
+    } else if (trocarCom !== undefined && trocarCom !== item) {
+      // Caixa cheia: soltar em cima de uma notícia troca as duas de lugar.
+      next.set(trocarCom, de);
+      next.set(item, caixa);
+    } else {
+      return;
+    }
+    setEscolhidas(next);
+    if (caixa > caixasManual) setCaixasManual(caixa);
+  };
+
+  const salvarHorarios = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch("/api/noticias/dia", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cortes }),
+      });
+      const corpo = await r.json();
+      if (!r.ok) throw new Error(corpo?.error ?? `HTTP ${r.status}`);
+      toast("Horários das caixas salvos", "ok");
+      setCortesLocal(null);
+      await carregarDia();
+    } catch (e) {
+      toast(`Erro ao salvar horários: ${e instanceof Error ? e.message : e}`, "err");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   /* ── Carregar o feed ─────────────────────────────────────── */
   const loadFeed = useCallback(async () => {
@@ -220,7 +341,9 @@ export function NewsGenerator() {
    * folga de propagação de dez minutos — ninguém fica de tela aberta esperando.
    */
   const enviarParaKuma = async () => {
-    const fila = [...queue].sort((a, b) => a - b);
+    // Caixa por caixa, na ordem: se o lote parar no meio, o que subiu é o
+    // começo do dia, e não um pedaço de cada janela.
+    const fila = [...alocacao.entries()].sort((a, b) => a[1] - b[1] || a[0] - b[0]);
     if (!fila.length) return toast("Marque ao menos uma notícia na fila.", "err");
 
     const base64 = async (item: NewsItem, fmtIndex: number) => {
@@ -240,9 +363,9 @@ export function NewsGenerator() {
     const enviados: number[] = [];
     const falhas: number[] = [];
     try {
-      for (const [n, i] of fila.entries()) {
+      for (const [n, [i, caixa]] of fila.entries()) {
         const item = items[i];
-        setStatus({ text: `Enviando ${n + 1}/${fila.length}…` });
+        setStatus({ text: `Enviando ${n + 1}/${fila.length} · caixa ${caixa}…` });
         try {
           const r = await fetch("/api/noticias/publicar", {
             method: "POST",
@@ -250,6 +373,8 @@ export function NewsGenerator() {
             body: JSON.stringify({
               titulo: item.title,
               duracao: 10,
+              caixa,
+              cortes,
               imagem32: await base64(item, 0),
               imagem25: await base64(item, 1),
             }),
@@ -273,6 +398,8 @@ export function NewsGenerator() {
     if (enviados.length) {
       const feitos = new Set(enviados);
       setQueue((q) => new Set([...q].filter((i) => !feitos.has(i))));
+      setCortesLocal(null);
+      void carregarDia();
     }
     if (falhas.length) {
       setStatus({
@@ -290,8 +417,8 @@ export function NewsGenerator() {
           // é o que acontece, e é melhor dizer aqui do que a operação descobrir
           // cronometrando: a exibição é de 10s, uma notícia por vez.
           (enviados.length > 1
-            ? " Depois de aprovadas elas dividem as exibições do dia, uma notícia" +
-              " por exibição — a exibição continua sendo de 10 segundos."
+            ? " Depois de aprovadas, as notícias de cada caixa dividem as exibições da" +
+              " janela dela, uma por exibição — a exibição continua sendo de 10 segundos."
             : ""),
         ok: true,
       });
@@ -438,15 +565,20 @@ export function NewsGenerator() {
 
         <div className="publicar-bloco">
           <button className="btn btn-accent" onClick={() => void enviarParaKuma()}
-            disabled={!queue.size || busy}>
-            🚀 Enviar fila para o Kuma{queue.size > 1 ? ` (${queue.size})` : ""}
+            disabled={!alocacao.size || busy}>
+            🚀 Enviar fila para o Kuma{alocacao.size > 1 ? ` (${alocacao.size})` : ""}
           </button>
           <span className="publicar-nota">
-            {queue.size
-              ? `Envia ${queue.size === 1 ? "a notícia marcada" : `as ${queue.size} notícias marcadas`} `
-                + "na fila. Cada uma vira um envio próprio e aparece na Análise Criativa "
-                + "em ~10 min; depois que você aprovar, a unidade é criada sozinha."
+            {alocacao.size
+              ? `Envia ${alocacao.size === 1 ? "a notícia marcada" : `as ${alocacao.size} notícias marcadas`} `
+                + "nas caixas da programação do dia. Cada uma aparece na Análise Criativa "
+                + "em ~10 min; depois que você aprovar, ela entra na janela da caixa dela."
               : "Marque as notícias na fila para liberar o envio."}
+            {semVaga > 0 && (
+              <b className="publicar-aviso">
+                {" "}{semVaga} marcada{semVaga === 1 ? "" : "s"} sem vaga — as {MAX_CAIXAS} caixas do dia estão cheias.
+              </b>
+            )}
           </span>
         </div>
       </div>
@@ -652,9 +784,48 @@ export function NewsGenerator() {
         })}
       </div>
 
+      <NewsBoxes
+        items={items}
+        alocacao={alocacao}
+        caixas={caixas}
+        maxCaixas={dia?.maxCaixas ?? MAX_CAIXAS}
+        vagas={vagas}
+        cortes={cortes}
+        dia={dia}
+        carregando={carregandoDia}
+        busy={busy}
+        selIdx={selIdx}
+        horariosPendentes={horariosPendentes}
+        onMover={moverParaCaixa}
+        onRemover={(i) => toggleQueue(i)}
+        onSelecionar={(i) => setSelIdx(i)}
+        onCortes={setCortesLocal}
+        onNovaCaixa={() => setCaixasManual(Math.min(caixas + 1, MAX_CAIXAS))}
+        onRemoverCaixa={(c) => setCaixasManual(Math.max(1, c - 1))}
+        onEnviar={() => void enviarParaKuma()}
+        onSalvarHorarios={() => void salvarHorarios()}
+        onAtualizar={() => {
+          setCarregandoDia(true);
+          void carregarDia();
+        }}
+      />
+
       {toastNode}
     </AppShell>
   );
+}
+
+/** O dia de hoje como o servidor vê. Falha vira `null`: a tela segue com o que tinha. */
+async function lerDia(): Promise<DiaNoticias | null> {
+  try {
+    const r = await fetch("/api/noticias/dia", { cache: "no-store" });
+    const corpo = await r.json();
+    if (!r.ok) throw new Error(corpo?.error ?? `HTTP ${r.status}`);
+    return corpo as DiaNoticias;
+  } catch (e) {
+    console.warn(`[noticias/dia] ${e instanceof Error ? e.message : e}`);
+    return null;
+  }
 }
 
 /* ── Controles reutilizáveis ───────────────────────────────── */

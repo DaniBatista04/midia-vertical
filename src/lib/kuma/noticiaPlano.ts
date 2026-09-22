@@ -83,6 +83,15 @@ export type PlanoNoticias = {
   grupos: string[];
 
   /**
+   * Em que caixa cada grupo está (ver `noticiaCaixas.ts`), a partir de 1.
+   *
+   * Ausente nos planos de antes das caixas, e grupo sem entrada aqui é da caixa
+   * 1: um plano antigo continua sendo um dia de uma caixa só, com todas as
+   * notícias revezando o dia inteiro, que é o que ele era.
+   */
+  caixaDoGrupo?: Record<string, number>;
+
+  /**
    * A lista que foi mandada no último `createOrderStrategy` — já com o padding
    * do `gruposParaEstrategia`, e por isso diferente de `grupos`.
    *

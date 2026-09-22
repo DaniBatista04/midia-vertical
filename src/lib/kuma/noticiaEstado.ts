@@ -22,6 +22,11 @@ export type EstadoNoticia = {
   indice: number;
   /** Segundos de exibição de cada material. */
   duracao: number;
+  /**
+   * Caixa do dia em que a notícia entra, a partir de 1 (ver `noticiaCaixas.ts`).
+   * Envio de antes das caixas não tem, e conta como caixa 1.
+   */
+  caixa?: number;
 
   /** Quando os JPGs terminaram de subir para o Storage. */
   hospedadoEm: string;

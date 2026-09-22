@@ -10,10 +10,11 @@
  *
  * Cada envio tem seu próprio grupo criativo — é o que passa pela Análise
  * Criativa individualmente —, mas a **unidade é uma por dia**: todos os grupos
- * do mesmo dia são amarrados nela e ficam juntos na estratégia, e é o Kuma que
- * reparte as exibições entre eles — uma notícia por exibição, em todas as
- * janelas do dia. Ver `noticiaPlano.ts` para a evidência disso, para a regra do
- * padding que a Brato exige e para o limite de notícias por dia.
+ * do mesmo dia são amarrados nela. Os grupos se dividem em caixas de até quatro,
+ * e a estratégia carrega a caixa da hora: o Kuma reparte as exibições entre as
+ * notícias dela, uma por exibição, e o cron troca a caixa quando a janela vira.
+ * Ver `noticiaPlano.ts` para a evidência da repartição e a regra do padding que
+ * a Brato exige, e `noticiaCaixas.ts` para a divisão do dia.
  */
 
 import {
@@ -42,12 +43,19 @@ import {
 import { montarGrupoNoticia } from "./newsGroup";
 import {
   caminhoPlanoNoticias,
-  gruposParaEstrategia,
   mesmaEstrategia,
-  slotsDaFrequencia,
   type PlanoNoticias,
 } from "./noticiaPlano";
-import { caminhoNoticia, type EstadoNoticia } from "./noticiaEstado";
+import {
+  caminhoGrade,
+  estrategiaDaHora,
+  gruposPorCaixa,
+  horaEmSaoPaulo,
+  vagasPorCaixa,
+  type EstrategiaDaHora,
+  type GradeNoticias,
+} from "./noticiaCaixas";
+import { caminhoNoticia, idNoticia, type EstadoNoticia } from "./noticiaEstado";
 import { LEASE_SEGUNDOS } from "./estado";
 import { apagar, lerJson, uploadPublico } from "../server/supabaseUpload";
 
@@ -93,6 +101,17 @@ async function gravarPlano(plano: PlanoNoticias): Promise<void> {
     conteudo: Buffer.from(JSON.stringify(limpo, null, 2)),
     contentType: "application/json",
   });
+}
+
+/**
+ * A estratégia que o plano pede agora: a da caixa da hora, com a grade de
+ * horários gravada para o dia (ou a divisão padrão, sem ela).
+ */
+async function estrategiaAgora(
+  plano: Pick<PlanoNoticias, "data" | "grupos" | "caixaDoGrupo" | "frequencia">,
+): Promise<EstrategiaDaHora> {
+  const grade = await lerJson<GradeNoticias>(caminhoGrade(plano.data));
+  return estrategiaDaHora(plano, grade, horaEmSaoPaulo());
 }
 
 /** Onde a notícia foi amarrada, ou o motivo de ela não ter sido. */
@@ -159,11 +178,13 @@ async function abrirPlano(
   }
 
   const agora = new Date().toISOString();
+  const caixaDoGrupo = { [grupoId]: estado.caixa ?? 1 };
   const reserva: PlanoNoticias = {
     data,
     duracao: estado.duracao,
     frequencia,
     grupos: [],
+    caixaDoGrupo: {},
     criadoEm: agora,
     criandoEm: agora,
   };
@@ -184,8 +205,10 @@ async function abrirPlano(
     `${id}: plano ${unidadeId} criado para ${data} em ${itens.map((i) => siglaCidade(i.cityId)).join(" + ")}`,
   );
 
-  // Unidade sem criativo trava inventário e não exibe nada.
-  const estrategia = gruposParaEstrategia([grupoId], frequencia);
+  // Unidade sem criativo trava inventário e não exibe nada. Com um grupo só, a
+  // estratégia é ele, seja qual for a caixa dele: caixa da hora vazia cai na
+  // que tiver notícia.
+  const { estrategia } = await estrategiaAgora({ data, grupos: [grupoId], caixaDoGrupo, frequencia });
   try {
     await createOrderStrategy(unidadeId, estrategia, cfg);
   } catch (e) {
@@ -205,6 +228,7 @@ async function abrirPlano(
     ...reserva,
     unidadeId,
     grupos: [grupoId],
+    caixaDoGrupo,
     estrategia,
     telas: travadas,
     atualizadoEm: new Date().toISOString(),
@@ -257,11 +281,12 @@ async function unidadeDoPlano(
 /**
  * Amarra a notícia no plano que o dia já tem.
  *
- * A notícia entra na lista de grupos do plano e a estratégia é remontada com
- * todos eles: a chamada substitui a estratégia inteira, então mandar só o grupo
- * novo tiraria as notícias anteriores do ar. A recém-aprovada estreia em
- * minutos, e o que muda para as que já estavam no ar é a fatia — as exibições
- * do dia passam a ser divididas por mais uma.
+ * A notícia entra na lista de grupos do plano, na caixa dela, e a estratégia é
+ * remontada com a caixa da hora inteira: a chamada substitui a estratégia, então
+ * mandar só o grupo novo tiraria as vizinhas de caixa do ar. Se a caixa dela é a
+ * que está no ar, ela estreia em minutos e as vizinhas passam a dividir as
+ * exibições com mais uma; se é de outra janela, só o registro muda, e ela entra
+ * no ar quando o cron virar a caixa.
  *
  * Nenhuma tela é travada aqui: a unidade já reservou as dela quando nasceu, e é
  * justamente isso que o plano compartilhado economiza — antes, quatro notícias
@@ -275,7 +300,8 @@ async function entrarNoPlano(
 ): Promise<Amarracao> {
   const { cfg, log, frequencia } = opts;
   const id = estado.id;
-  const slots = slotsDaFrequencia(frequencia);
+  const caixa = estado.caixa ?? 1;
+  const vagas = vagasPorCaixa(frequencia);
 
   // Reentrância: a estratégia já foi trocada numa volta anterior e o que faltou
   // foi gravar o envio. Repetir a chamada não estragaria nada, mas nada mudaria.
@@ -292,11 +318,12 @@ async function entrarNoPlano(
     };
   }
 
-  if (plano.grupos.length >= slots) {
+  const naCaixa = gruposPorCaixa(plano.grupos, plano.caixaDoGrupo).get(caixa)?.length ?? 0;
+  if (naCaixa >= vagas) {
     return {
       motivo:
-        `plano de ${plano.data} já está com ${plano.grupos.length} notícia(s), o máximo que ` +
-        `${frequencia} exibições/dia comporta`,
+        `a caixa ${caixa} de ${plano.data} já está com ${naCaixa} notícia(s), o máximo que ` +
+        `${frequencia} exibições/dia comporta numa estratégia`,
     };
   }
 
@@ -317,13 +344,17 @@ async function entrarNoPlano(
   const telas = unidade.telas ?? plano.telas ?? 0;
 
   const grupos = [...plano.grupos, grupoId];
+  const caixaDoGrupo = { ...plano.caixaDoGrupo, [grupoId]: caixa };
   const agora = new Date().toISOString();
   await gravarPlano({ ...plano, criandoEm: agora });
   await gravar({ ...estado, criandoEm: agora });
 
-  const estrategia = gruposParaEstrategia(grupos, frequencia);
+  const { estrategia, caixa: noAr } = await estrategiaAgora({ ...plano, grupos, caixaDoGrupo });
   try {
-    await createOrderStrategy(plano.unidadeId, estrategia, cfg);
+    // Notícia de uma caixa que não é a da hora não muda o que está no ar.
+    if (!mesmaEstrategia(plano.estrategia, estrategia)) {
+      await createOrderStrategy(plano.unidadeId, estrategia, cfg);
+    }
   } catch (e) {
     /*
      * Aqui a unidade **não** é cancelada, ao contrário do caminho que a cria:
@@ -339,32 +370,47 @@ async function entrarNoPlano(
   await gravarPlano({
     ...plano,
     grupos,
+    caixaDoGrupo,
     estrategia,
     telas,
     atualizadoEm: new Date().toISOString(),
     criandoEm: undefined,
   });
   log(
-    `${id}: entrou no plano ${plano.unidadeId} — ${grupos.length} de até ${slots} notícia(s) ` +
-      `dividindo ${frequencia} exibições/dia`,
+    `${id}: entrou no plano ${plano.unidadeId} na caixa ${caixa} (${naCaixa + 1} de até ${vagas}) — ` +
+      (noAr === caixa ? "no ar agora" : `no ar está a caixa ${noAr}`),
   );
 
   return { unidadeId: plano.unidadeId, telas };
 }
 
 export type PassoEstrategia =
-  | { estado: "reescrita"; data: string; unidadeId: string; noticias: number; vagas: number }
-  | { estado: "em-dia"; data: string; noticias: number }
+  | {
+      estado: "reescrita";
+      data: string;
+      unidadeId: string;
+      noticias: number;
+      vagas: number;
+      caixa: number;
+      caixas: number;
+    }
+  | { estado: "em-dia"; data: string; noticias: number; caixa: number; caixas: number }
   | { estado: "sem-estrategia"; data: string; motivo: string };
 
 /**
- * Confere se a estratégia da unidade do dia carrega as notícias todas.
+ * Confere se a estratégia da unidade do dia carrega a caixa da hora.
+ *
+ * É aqui que a caixa vira: quando a janela muda, a lista que o plano pede deixa
+ * de bater com a que foi mandada, e a volta reescreve a estratégia. A troca
+ * chega às telas na virada seguinte da faixa de programação do Kuma, e não no
+ * minuto da chamada (ver `noticiaCaixas.ts`).
  *
  * Na maioria das voltas ela não faz nada: o registro do plano guarda a lista que
  * foi mandada no último `createOrderStrategy`, e quando ela bate com a que o
- * plano pede o custo da volta é a leitura de um JSON. Existe para as situações
- * em que a estratégia fica para trás do plano sem ninguém perceber, porque o
- * Kuma não tem endpoint para ler a estratégia de uma unidade:
+ * plano pede o custo da volta é a leitura de dois JSON. Além da virada da caixa,
+ * existe para as situações em que a estratégia fica para trás do plano sem
+ * ninguém perceber, porque o Kuma não tem endpoint para ler a estratégia de uma
+ * unidade:
  *
  *  - uma volta que morreu entre gravar a lista e mandá-la ao Kuma; e
  *  - os planos criados enquanto o rodízio existiu (01 a 03/09/2026), que têm um
@@ -393,9 +439,10 @@ export async function sincronizarEstrategia(
     return { estado: "sem-estrategia", data: dataISO, motivo: "plano sem grupo criativo" };
   }
 
-  const estrategia = gruposParaEstrategia(plano.grupos, plano.frequencia);
+  const { estrategia, caixa, caixas } = await estrategiaAgora(plano);
+  const naCaixa = estrategia.filter((g, i) => estrategia.indexOf(g) === i).length;
   if (mesmaEstrategia(plano.estrategia, estrategia)) {
-    return { estado: "em-dia", data: dataISO, noticias: plano.grupos.length };
+    return { estado: "em-dia", data: dataISO, noticias: naCaixa, caixa, caixas };
   }
 
   const conta = process.env.KUMA_BIDDER_NEWS?.trim();
@@ -425,15 +472,17 @@ export async function sincronizarEstrategia(
   });
 
   log(
-    `plano de ${dataISO}: estratégia reescrita com ${plano.grupos.length} notícia(s) ` +
-      `em ${estrategia.length} vaga(s)`,
+    `plano de ${dataISO}: estratégia reescrita com a caixa ${caixa} de ${caixas} — ` +
+      `${naCaixa} notícia(s) em ${estrategia.length} vaga(s)`,
   );
   return {
     estado: "reescrita",
     data: dataISO,
     unidadeId: plano.unidadeId,
-    noticias: plano.grupos.length,
+    noticias: naCaixa,
     vagas: estrategia.length,
+    caixa,
+    caixas,
   };
 }
 
@@ -617,4 +666,28 @@ export function descreverPasso(p: PassoNoticia): string {
 /** Lê um envio pelo id. */
 export async function lerNoticia(id: string): Promise<EstadoNoticia | null> {
   return lerJson<EstadoNoticia>(caminhoNoticia(id));
+}
+
+/**
+ * O que o dia já tem: os envios registrados e o próximo índice livre.
+ *
+ * O índice separa as notícias de um mesmo dia e entra no nome do arquivo — e
+ * nome repetido entre requisições é reprovado pelo Kuma com 502 e feedback
+ * vazio. Procurar o primeiro id livre é o que garante que dois envios no mesmo
+ * dia não colidam.
+ *
+ * A varredura para no primeiro id ausente, e os envios devolvidos são os que
+ * vêm antes dele — que é exatamente o que a busca pelo índice livre já
+ * enxergava. Ler o bucket inteiro para contar as notícias de um dia não se paga.
+ */
+export async function enviosDoDia(
+  dataISO: string,
+): Promise<{ envios: EstadoNoticia[]; indice: number }> {
+  const envios: EstadoNoticia[] = [];
+  for (let i = 1; i <= 50; i++) {
+    const existe = await lerJson<EstadoNoticia>(caminhoNoticia(idNoticia(dataISO, i)));
+    if (!existe) return { envios, indice: i };
+    envios.push(existe);
+  }
+  throw new Error(`já existem 50 envios para ${dataISO} — algo está errado`);
 }
