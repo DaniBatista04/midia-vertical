@@ -10,6 +10,9 @@ import "@fontsource/dm-sans/300.css";
 import "@fontsource/dm-sans/400.css";
 import "@fontsource/dm-sans/700.css";
 import "@fontsource/bebas-neue/400.css";
+import "@fontsource/orbitron/600.css";
+import "@fontsource/orbitron/800.css";
+import "@fontsource/orbitron/900.css";
 
 import "./globals.css";
 
