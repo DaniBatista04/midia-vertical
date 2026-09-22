@@ -1009,16 +1009,28 @@ input[type="range"]::-moz-range-thumb {
    Cada caixa tem uma cor (`--c`), a mesma no segmento da linha do
    tempo e no cartão, para o olho ligar um ao outro sem ler rótulo.
    ══════════════════════════════════════════════════════════════ */
+/*
+ * Na aba Notícias a área principal rola inteira: os previews de 32" e 25"
+ * ficam com a altura deles, e a programação vem embaixo. Com a programação
+ * presa no rodapé ela espremia os previews, que são justamente onde se vê como
+ * a notícia vai ficar na tela.
+ */
+[data-app="news"] .main-wrap {
+  overflow-y: auto;
+}
+[data-app="news"] .canvas-area {
+  flex: none;
+  overflow: visible;
+}
+
 .boxes-dock {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  max-height: 52vh;
   background:
     radial-gradient(120% 140% at 0% 0%, #2a3a40 0%, transparent 55%),
     linear-gradient(180deg, #262626 0%, #1f1f1f 100%);
-  border-top: 1px solid #ffffff14;
-  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.35);
+  border-top: 1px solid var(--border);
 }
 .boxes-head {
   display: flex;
@@ -1117,8 +1129,7 @@ input[type="range"]::-moz-range-thumb {
   font-weight: 700;
 }
 .boxes-body {
-  overflow-y: auto;
-  padding: 14px 18px 12px;
+  padding: 14px 18px 18px;
   display: flex;
   flex-direction: column;
   gap: 14px;
