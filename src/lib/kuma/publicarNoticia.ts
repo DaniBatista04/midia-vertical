@@ -322,7 +322,7 @@ async function entrarNoPlano(
   if (naCaixa >= vagas) {
     return {
       motivo:
-        `a caixa ${caixa} de ${plano.data} já está com ${naCaixa} notícia(s), o máximo que ` +
+        `o pack ${caixa} de ${plano.data} já está com ${naCaixa} notícia(s), o máximo que ` +
         `${frequencia} exibições/dia comporta numa estratégia`,
     };
   }
@@ -377,8 +377,8 @@ async function entrarNoPlano(
     criandoEm: undefined,
   });
   log(
-    `${id}: entrou no plano ${plano.unidadeId} na caixa ${caixa} (${naCaixa + 1} de até ${vagas}) — ` +
-      (noAr === caixa ? "no ar agora" : `no ar está a caixa ${noAr}`),
+    `${id}: entrou no plano ${plano.unidadeId} no pack ${caixa} (${naCaixa + 1} de até ${vagas}) — ` +
+      (noAr === caixa ? "no ar agora" : `no ar está o pack ${noAr}`),
   );
 
   return { unidadeId: plano.unidadeId, telas };
@@ -472,7 +472,7 @@ export async function sincronizarEstrategia(
   });
 
   log(
-    `plano de ${dataISO}: estratégia reescrita com a caixa ${caixa} de ${caixas} — ` +
+    `plano de ${dataISO}: estratégia reescrita com o pack ${caixa} de ${caixas} — ` +
       `${naCaixa} notícia(s) em ${estrategia.length} vaga(s)`,
   );
   return {

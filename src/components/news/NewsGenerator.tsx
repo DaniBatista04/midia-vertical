@@ -175,7 +175,7 @@ export function NewsGenerator() {
       });
       const corpo = await r.json();
       if (!r.ok) throw new Error(corpo?.error ?? `HTTP ${r.status}`);
-      toast("Horários das caixas salvos", "ok");
+      toast("Horários dos packs salvos", "ok");
       setCortesLocal(null);
       await carregarDia();
     } catch (e) {
@@ -365,7 +365,7 @@ export function NewsGenerator() {
     try {
       for (const [n, [i, caixa]] of fila.entries()) {
         const item = items[i];
-        setStatus({ text: `Enviando ${n + 1}/${fila.length} · caixa ${caixa}…` });
+        setStatus({ text: `Enviando ${n + 1}/${fila.length} · pack ${caixa}…` });
         try {
           const r = await fetch("/api/noticias/publicar", {
             method: "POST",
@@ -417,7 +417,7 @@ export function NewsGenerator() {
           // é o que acontece, e é melhor dizer aqui do que a operação descobrir
           // cronometrando: a exibição é de 10s, uma notícia por vez.
           (enviados.length > 1
-            ? " Depois de aprovadas, as notícias de cada caixa dividem as exibições da" +
+            ? " Depois de aprovadas, as notícias de cada pack dividem as exibições da" +
               " janela dela, uma por exibição — a exibição continua sendo de 10 segundos."
             : ""),
         ok: true,
@@ -571,12 +571,12 @@ export function NewsGenerator() {
           <span className="publicar-nota">
             {alocacao.size
               ? `Envia ${alocacao.size === 1 ? "a notícia marcada" : `as ${alocacao.size} notícias marcadas`} `
-                + "nas caixas da programação do dia. Cada uma aparece na Análise Criativa "
-                + "em ~10 min; depois que você aprovar, ela entra na janela da caixa dela."
+                + "nos packs da programação do dia. Cada uma aparece na Análise Criativa "
+                + "em ~10 min; depois que você aprovar, ela entra na janela do pack dela."
               : "Marque as notícias na fila para liberar o envio."}
             {semVaga > 0 && (
               <b className="publicar-aviso">
-                {" "}{semVaga} marcada{semVaga === 1 ? "" : "s"} sem vaga — as {MAX_CAIXAS} caixas do dia estão cheias.
+                {" "}{semVaga} marcada{semVaga === 1 ? "" : "s"} sem vaga — os {MAX_CAIXAS} packs do dia estão cheios.
               </b>
             )}
           </span>

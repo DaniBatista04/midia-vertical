@@ -126,7 +126,7 @@ export async function PUT(req: NextRequest) {
   const caixas = Math.max(1, ...envios.filter((e) => !e.erro).map((e) => e.caixa ?? 1));
   if (n < caixas) {
     return Response.json(
-      { error: `O dia tem ${caixas} caixa(s) com notícia, e os horários descrevem ${n}.` },
+      { error: `O dia tem ${caixas} pack(s) com notícia, e os horários descrevem ${n}.` },
       { status: 409 },
     );
   }

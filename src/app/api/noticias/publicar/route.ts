@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
   const caixa = Number(corpo.caixa ?? 1);
   if (!Number.isInteger(caixa) || caixa < 1 || caixa > MAX_CAIXAS) {
     return Response.json(
-      { error: `Caixa inválida: ${corpo.caixa} — de 1 a ${MAX_CAIXAS}.` },
+      { error: `Pack inválido: ${corpo.caixa} — de 1 a ${MAX_CAIXAS}.` },
       { status: 400 },
     );
   }
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
     const n = Array.isArray(corpo.cortes) ? corpo.cortes.length + 1 : 0;
     if (!cortesValidos(corpo.cortes, n) || caixa > n) {
       return Response.json(
-        { error: `Horários das caixas inválidos: ${JSON.stringify(corpo.cortes)}.` },
+        { error: `Horários dos packs inválidos: ${JSON.stringify(corpo.cortes)}.` },
         { status: 400 },
       );
     }
@@ -144,8 +144,8 @@ export async function POST(req: NextRequest) {
     return Response.json(
       {
         error:
-          `A caixa ${caixa} de ${data} já tem ${naCaixa} notícia(s) — é o máximo que ` +
-          `${frequencia} exibições/dia comporta numa caixa. Use outra caixa.`,
+          `O pack ${caixa} de ${data} já tem ${naCaixa} notícia(s) — é o máximo que ` +
+          `${frequencia} exibições/dia comporta num pack. Use outro pack.`,
       },
       { status: 409 },
     );

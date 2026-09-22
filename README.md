@@ -116,9 +116,10 @@ sobe para quatro repetindo a primeira, que fica com duas fatias.
 `durationInSecond` também é campo da unidade, então o dia inteiro veicula na
 mesma duração.
 
-### Caixas: mais de quatro notícias no dia
+### Packs: mais de quatro notícias no dia
 
-Para passar de quatro, o dia se divide em **caixas** de até quatro notícias,
+Para passar de quatro, o dia se divide em **packs** de até quatro notícias
+(no código, `caixa` — o painel mostra "pack"),
 cada uma com a sua janela — oito notícias viram duas caixas, a primeira até as
 16h e a segunda depois. São até quatro caixas, e a divisão do dia vai das 6h à
 meia-noite, com os cortes em hora par. A **Programação do dia**, embaixo dos

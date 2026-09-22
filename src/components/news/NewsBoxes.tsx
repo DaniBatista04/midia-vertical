@@ -131,10 +131,10 @@ export function NewsBoxes(p: Props) {
           <span className="sep" />
           <span><b>{totalPendentes}</b> na fila</span>
           <span className="sep" />
-          <span><b>{p.caixas}</b> caixa{p.caixas === 1 ? "" : "s"}</span>
+          <span><b>{p.caixas}</b> pack{p.caixas === 1 ? "" : "s"}</span>
           {noAr !== null && (
             <span className="boxes-noar" style={{ ["--c" as string]: CORES_CAIXA[noAr - 1] }}>
-              <i /> Caixa {noAr} no ar
+              <i /> Pack {noAr} no ar
             </span>
           )}
         </div>
@@ -152,7 +152,7 @@ export function NewsBoxes(p: Props) {
           <button className="btn btn-accent btn-sm boxes-enviar" onClick={p.onEnviar}
             disabled={!totalPendentes || p.busy}>
             🚀 Enviar {totalPendentes || ""} {totalPendentes === 1 ? "notícia" : "notícias"}
-            {caixasUsadas > 1 ? ` em ${caixasUsadas} caixas` : ""}
+            {caixasUsadas > 1 ? ` em ${caixasUsadas} packs` : ""}
           </button>
         </div>
       </header>
@@ -176,7 +176,7 @@ export function NewsBoxes(p: Props) {
                     }}
                   >
                     <span className="tl-seg-lbl">
-                      Caixa {c}
+                      Pack {c}
                       <em>{rotuloHora(j.inicio)} – {rotuloHora(j.fim)}</em>
                     </span>
                   </div>
@@ -241,14 +241,14 @@ export function NewsBoxes(p: Props) {
                   <div className="bx-head">
                     <span className="bx-num">{c}</span>
                     <div className="bx-tit">
-                      <strong>Caixa {c}</strong>
+                      <strong>Pack {c}</strong>
                       <span>{rotuloHora(j.inicio)} → {rotuloHora(j.fim)}</span>
                     </div>
                     <span className={`bx-badge ${estado}`}>
                       {estado === "live" ? <><i /> No ar</> : estado === "passou" ? "Encerrada" : "A seguir"}
                     </span>
                     {!ocupadas && p.caixas > 1 && c === p.caixas && (
-                      <button className="bx-x" onClick={() => p.onRemoverCaixa(c)} title="Remover caixa vazia">×</button>
+                      <button className="bx-x" onClick={() => p.onRemoverCaixa(c)} title="Remover pack vazio">×</button>
                     )}
                   </div>
 
@@ -283,7 +283,7 @@ export function NewsBoxes(p: Props) {
                           }}
                           onDrop={soltarEm(c, i)}
                           onClick={() => p.onSelecionar(i)}
-                          title={`${it.title}\nArraste para outra caixa`}
+                          title={`${it.title}\nArraste para outro pack`}
                         >
                           {it.imgUrl ? (
                             // eslint-disable-next-line @next/next/no-img-element
@@ -342,15 +342,15 @@ export function NewsBoxes(p: Props) {
                 onDrop={soltarEm(p.caixas + 1)}
               >
                 <span className="bx-nova-plus">+</span>
-                <strong>Nova caixa</strong>
+                <strong>Novo pack</strong>
                 <em>divide o dia em {p.caixas + 1} janelas</em>
               </button>
             )}
           </div>
 
           <p className="boxes-nota">
-            Dentro da caixa as notícias revezam <b>uma por exibição</b>, 10 s cada. Na hora da troca
-            o sistema passa a próxima caixa para o Kuma, que leva à tela na virada da faixa de
+            Dentro do pack as notícias revezam <b>uma por exibição</b>, 10 s cada. Na hora da troca
+            o sistema passa o próximo pack para o Kuma, que leva à tela na virada da faixa de
             programação dele.
             {parados.length > 0 && (
               <span className="boxes-parados">
