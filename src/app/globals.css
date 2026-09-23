@@ -1144,7 +1144,7 @@ input[type="range"]::-moz-range-thumb {
   height: 34px;
   border-radius: 10px;
   background:
-    repeating-linear-gradient(90deg, #ffffff08 0 1px, transparent 1px calc(100% / 12)),
+    repeating-linear-gradient(90deg, #ffffff08 0 1px, transparent 1px calc(100% / 24)),
     #161616;
   border: 1px solid #ffffff10;
   touch-action: none;

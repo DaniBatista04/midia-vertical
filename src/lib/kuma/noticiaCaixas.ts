@@ -86,9 +86,9 @@ export function caminhoGrade(dataISO: string): string {
   return `${PREFIXO_GRADES}/${dataISO}.json`;
 }
 
-/** O início serve? Hora inteira, com espaço para pelo menos uma faixa de duas horas. */
+/** O início serve? Hora inteira, com pelo menos uma hora de janela até o fim do dia. */
 export function inicioValido(inicio: unknown): inicio is number {
-  return Number.isInteger(inicio) && (inicio as number) >= 0 && (inicio as number) <= FIM_DIA - 2;
+  return Number.isInteger(inicio) && (inicio as number) >= 0 && (inicio as number) <= FIM_DIA - 1;
 }
 
 /** A hora em que a caixa 1 entra num dia: a da grade, se servir, e senão `INICIO_DIA`. */

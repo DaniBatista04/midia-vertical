@@ -90,16 +90,17 @@ export function NewsBoxes(p: Props) {
     const mover = (e: PointerEvent) => {
       const r = el.getBoundingClientRect();
       const h = ((e.clientX - r.left) / r.width) * HORAS;
-      // Hora par: é onde a faixa do Kuma vira, e um corte fora dela só
-      // chegaria à tela na próxima de qualquer jeito.
-      let alvoH = Math.round(h / 2) * 2;
+      // Hora cheia, com pelo menos uma hora de janela. A faixa do Kuma vira
+      // em hora par, então um corte em hora ímpar chega à tela na virada
+      // seguinte — mas a escolha é da operação.
+      let alvoH = Math.round(h);
       if (i < 0) {
-        alvoH = Math.min(Math.max(alvoH, 0), (p.cortes[0] ?? FIM_DIA) - 2);
+        alvoH = Math.min(Math.max(alvoH, 0), (p.cortes[0] ?? FIM_DIA) - 1);
         if (alvoH !== p.inicio) p.onInicio(alvoH);
         return;
       }
-      const min = (i === 0 ? p.inicio : p.cortes[i - 1]) + 2;
-      const max = (i === p.cortes.length - 1 ? FIM_DIA : p.cortes[i + 1]) - 2;
+      const min = (i === 0 ? p.inicio : p.cortes[i - 1]) + 1;
+      const max = (i === p.cortes.length - 1 ? FIM_DIA : p.cortes[i + 1]) - 1;
       alvoH = Math.min(Math.max(alvoH, min), max);
       if (alvoH !== p.cortes[i]) p.onCortes(p.cortes.map((c, k) => (k === i ? alvoH : c)));
     };

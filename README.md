@@ -122,11 +122,12 @@ Para passar de quatro, o dia se divide em **packs** de até quatro notícias
 (no código, `caixa` — o painel mostra "pack"),
 cada uma com a sua janela — oito notícias viram duas caixas, a primeira até as
 16h e a segunda depois. São até quatro caixas, e a divisão do dia vai das 6h à
-meia-noite, com os cortes em hora par. A **Programação do dia**, embaixo dos
+meia-noite, com os cortes padrão em hora par. A **Programação do dia**, embaixo dos
 previews, mostra a linha do tempo e as caixas: marcar notícia na fila enche a
 primeira caixa com vaga (e abre a seguinte), dá para arrastar notícia entre
-caixas e arrastar o divisor para mudar o horário da troca. O início do pack 1
-também se arrasta (padrão 6h): antes dele fica no ar o **último** pack do dia,
+caixas e arrastar o divisor para mudar o horário da troca, de hora em hora
+(em hora ímpar a troca chega à tela na virada seguinte da faixa do Kuma, que
+vira em hora par). O início do pack 1 também se arrasta (padrão 6h): antes dele fica no ar o **último** pack do dia,
 dando a volta no relógio — a unidade não tem `hours`, então a madrugada nunca
 fica sem notícia, e segue com o pack da noite até o da manhã entrar.
 
