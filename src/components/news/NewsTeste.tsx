@@ -22,7 +22,7 @@ type Props = {
   /** Título da notícia selecionada no feed, ou `null`. */
   selecionada: string | null;
   busy: boolean;
-  onEnviar: (predio: Predio) => Promise<void>;
+  onEnviar: (predio: Predio, pontos: string[]) => Promise<void>;
   onAtualizar: () => void;
 };
 
@@ -46,6 +46,14 @@ export function NewsTeste(p: Props) {
   const [erroBusca, setErroBusca] = useState<string | null>(null);
   const [predio, setPredio] = useState<Predio | null>(null);
   const [acao, setAcao] = useState<string | null>(null);
+  const [projetoId, setProjetoId] = useState("");
+  const [pontosTxt, setPontosTxt] = useState("");
+  const pontos = pontosTxt.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
+  const pontosOk = pontos.every((pt) => /^\d+$/.test(pt));
+  // O ID do projeto digitado vale mais que o prédio achado pela busca.
+  const alvo: Predio | null = /^\d+$/.test(projetoId.trim())
+    ? { buildingId: projetoId.trim(), buildingName: predio?.buildingId === projetoId.trim() ? predio.buildingName : "" }
+    : predio;
 
   const buscar = async () => {
     setBuscando(true);
@@ -120,6 +128,28 @@ export function NewsTeste(p: Props) {
             )}
           </div>
 
+          <div className="teste-form">
+            <input
+              className="teste-input curto"
+              placeholder="ou ID do projeto (ex.: 2015526)"
+              value={projetoId}
+              onChange={(e) => setProjetoId(e.target.value)}
+            />
+            <input
+              className="teste-input"
+              placeholder="Point IDs (opcional — vazio usa todas as telas)"
+              value={pontosTxt}
+              onChange={(e) => setPontosTxt(e.target.value)}
+            />
+            {alvo && (
+              <span className="teste-predio">
+                Alvo: <b>{alvo.buildingName || `Projeto ${alvo.buildingId}`}</b>
+                {pontos.length ? <> · só {pontos.length === 1 ? "o point" : "os points"} <code>{pontos.join(", ")}</code></> : " · todas as telas"}
+              </span>
+            )}
+          </div>
+          {!pontosOk && <p className="teste-erro">Point ID é só número; separe vários com vírgula.</p>}
+
           {erroBusca && <p className="teste-erro">{erroBusca}</p>}
           {achados && (
             <div className="teste-achados">
@@ -138,8 +168,8 @@ export function NewsTeste(p: Props) {
 
           <button
             className="btn btn-accent btn-sm"
-            disabled={!predio || !p.selecionada || p.busy}
-            onClick={() => predio && void p.onEnviar(predio)}
+            disabled={!alvo || !pontosOk || !p.selecionada || p.busy}
+            onClick={() => alvo && void p.onEnviar(alvo, pontos)}
             title={!p.selecionada ? "Selecione uma notícia no feed" : undefined}
           >
             {p.busy ? <span className="spinner" /> : "🧪"} Enviar como teste

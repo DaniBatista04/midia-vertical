@@ -441,11 +441,13 @@ export function NewsGenerator() {
   };
 
   /** Pack de teste do `ignoreLock`: a notícia selecionada, num prédio só. */
-  const enviarTeste = async (predio: { buildingId: string; buildingName: string }) => {
+  const enviarTeste = async (predio: { buildingId: string; buildingName: string }, pontos: string[]) => {
     if (!selected) return toast("Selecione uma notícia no feed.", "err");
+    const onde = predio.buildingName || `projeto ${predio.buildingId}`;
+    const telas = pontos.length ? `no(s) point(s) ${pontos.join(", ")}` : "em todas as telas";
     const ok = window.confirm(
-      `Enviar “${selected.title.slice(0, 80)}” como teste do ignoreLock no prédio ${predio.buildingName}?\n\n` +
-        "Depois de aprovada no portal, ela ganha um plano e uma unidade só dela, nas telas desse prédio, hoje.",
+      `Enviar “${selected.title.slice(0, 80)}” como teste do ignoreLock ${telas} de ${onde}?\n\n` +
+        "Depois de aprovada no portal, ela ganha um plano e uma unidade só dela, nessas telas, hoje.",
     );
     if (!ok) return;
     setBusy(true);
@@ -456,7 +458,7 @@ export function NewsGenerator() {
         body: JSON.stringify({
           titulo: selected.title,
           duracao: 10,
-          teste: { predioId: predio.buildingId, predioNome: predio.buildingName },
+          teste: { predioId: predio.buildingId, predioNome: predio.buildingName, pontos },
           imagem32: await jpegBase64(selected, 0),
           imagem25: await jpegBase64(selected, 1),
         }),

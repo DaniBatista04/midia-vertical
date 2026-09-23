@@ -1900,6 +1900,9 @@ input[type="range"]::-moz-range-thumb {
   color: var(--text);
   font-size: 12px;
 }
+.teste-input.curto {
+  width: 220px;
+}
 .teste-predio {
   font-size: 11.5px;
   color: var(--muted);

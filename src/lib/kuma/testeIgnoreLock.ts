@@ -124,6 +124,31 @@ export async function abrirTeste(
   );
   teste.cidadeId = cidade;
 
+  /* ── Telas: conferidas antes de criar qualquer coisa ───────── */
+  // Um Point ID que não casa não pode deixar plano vazio para trás no Kuma.
+  let doPredio: string[];
+  try {
+    doPredio = (await getValidLocations(cidade, [teste.predioId], cfg)).map((l) => l.locationId);
+  } catch (e) {
+    return falhar("telas do prédio", e);
+  }
+  if (!doPredio.length) return falhar("telas do prédio", `o prédio ${teste.predioId} não tem tela válida`);
+
+  // Point ID escolhido à mão só entra se o Kuma o listar como tela válida do
+  // prédio: um id que não casa criaria unidade com tela errada, ou nenhuma.
+  let telas = doPredio;
+  if (teste.pontos?.length) {
+    const fora = teste.pontos.filter((pt) => !doPredio.includes(pt));
+    if (fora.length) {
+      return falhar(
+        "telas do prédio",
+        `Point ID ${fora.join(", ")} não está entre as telas válidas do prédio ${teste.predioId}: ` +
+          doPredio.join(", "),
+      );
+    }
+    telas = teste.pontos;
+  }
+
   /* ── 1. Plano próprio ───────────────────────────────────────── */
   if (!teste.planoId) {
     const pedido = {
@@ -147,14 +172,6 @@ export async function abrirTeste(
 
   /* ── 2. Unidade com ignoreLock ──────────────────────────────── */
   if (!teste.adUnitId) {
-    let telas: string[];
-    try {
-      telas = (await getValidLocations(cidade, [teste.predioId], cfg)).map((l) => l.locationId);
-    } catch (e) {
-      return falhar("telas do prédio", e);
-    }
-    if (!telas.length) return falhar("telas do prédio", `o prédio ${teste.predioId} não tem tela válida`);
-
     const pedido = {
       adCampaignId: teste.planoId,
       adSlotName: unidadeRef.adSlotName ?? "SMART_SCREEN_FULL",

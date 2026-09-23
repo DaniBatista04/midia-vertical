@@ -78,6 +78,11 @@ export type PassoDoTeste = { em: string; passo: string; ok: boolean; detalhe: st
 export type TesteIgnoreLock = {
   predioId: string;
   predioNome: string;
+  /**
+   * Telas (Point ID / `locationId`) escolhidas à mão. Sem elas, o teste usa
+   * todas as telas válidas do prédio.
+   */
+  pontos?: string[];
   cidadeId?: string;
   /** Plano criado para o teste — também é o `orderId` da estratégia. */
   planoId?: string;

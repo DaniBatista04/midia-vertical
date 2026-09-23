@@ -58,7 +58,7 @@ type Corpo = {
    * Envio de teste do `ignoreLock`: não entra em pack nem no plano do dia, e
    * depois de aprovado ganha plano e unidade só dele nas telas deste prédio.
    */
-  teste?: { predioId?: string; predioNome?: string };
+  teste?: { predioId?: string; predioNome?: string; pontos?: string[] };
   /** JPG 1080×1920, em base64 sem prefixo. */
   imagem32?: string;
   /** JPG 1080×2560, em base64 sem prefixo. */
@@ -117,11 +117,21 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const pontos = Array.isArray(corpo.teste?.pontos)
+    ? corpo.teste!.pontos.map((pt) => String(pt).trim()).filter(Boolean)
+    : [];
   const teste = corpo.teste
-    ? { predioId: String(corpo.teste.predioId ?? "").trim(), predioNome: String(corpo.teste.predioNome ?? "").trim() }
+    ? {
+        predioId: String(corpo.teste.predioId ?? "").trim(),
+        predioNome: String(corpo.teste.predioNome ?? "").trim() || `Projeto ${corpo.teste.predioId}`,
+        ...(pontos.length ? { pontos } : {}),
+      }
     : null;
   if (teste && !/^\d+$/.test(teste.predioId)) {
     return Response.json({ error: "Teste sem prédio — escolha o prédio onde a notícia vai tocar." }, { status: 400 });
+  }
+  if (pontos.some((pt) => !/^\d+$/.test(pt))) {
+    return Response.json({ error: `Point ID inválido: ${pontos.join(", ")}.` }, { status: 400 });
   }
 
   const imagens = [corpo.imagem32, corpo.imagem25];
