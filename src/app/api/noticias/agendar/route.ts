@@ -86,9 +86,9 @@ function basePublica(req: NextRequest): string {
   return daRequisicao;
 }
 
-/** Envio que já está no ar ou parado não precisa de mais nenhuma volta. */
+/** Envio que já está no ar, parado ou retirado não precisa de mais nenhuma volta. */
 function terminado(e: EstadoNoticia): boolean {
-  return Boolean(e.unidadeId) || Boolean(e.erro);
+  return Boolean(e.unidadeId) || Boolean(e.erro) || Boolean(e.retiradaEm);
 }
 
 export async function GET(req: NextRequest) {

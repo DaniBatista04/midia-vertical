@@ -142,12 +142,12 @@ export async function POST(req: NextRequest) {
    * operação — o Kuma reparte as exibições entre as notícias da caixa, uma por
    * exibição (ver `noticiaPlano.ts` e `noticiaCaixas.ts`). Mais notícias numa
    * caixa significaria menos tempo de tela para cada uma, não bloco maior; mais
-   * notícias no dia vão para outra caixa. Envio parado por erro não ocupa vaga:
-   * o grupo dele nunca foi amarrado.
+   * notícias no dia vão para outra caixa. Envio parado por erro não ocupa vaga,
+   * porque o grupo dele nunca foi amarrado, e o retirado já saiu do plano.
    */
   const frequencia = Number(process.env.KUMA_CLIMA_FREQUENCIA ?? FREQUENCIA_PADRAO);
   const vagas = vagasPorCaixa(frequencia);
-  const naEsteira = envios.filter((e) => !e.erro);
+  const naEsteira = envios.filter((e) => !e.erro && !e.retiradaEm);
   const naCaixa = naEsteira.filter((e) => (e.caixa ?? 1) === caixa).length;
   if (naCaixa >= vagas) {
     return Response.json(

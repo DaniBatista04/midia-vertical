@@ -29,7 +29,7 @@ export const dynamic = "force-dynamic";
  * lê a mesma grade — mudar um horário aqui chega à estratégia na volta seguinte.
  */
 
-export type EtapaEnvio = "propagando" | "em-aprovacao" | "no-plano" | "parado";
+export type EtapaEnvio = "propagando" | "em-aprovacao" | "no-plano" | "parado" | "retirada";
 
 export type EnvioDoDia = {
   id: string;
@@ -79,7 +79,7 @@ export async function GET(req: NextRequest) {
     const hora = horaEmSaoPaulo();
     const noAr = new Set(plano?.estrategia ?? []);
     const agora = plano?.grupos.length ? estrategiaDaHora(plano, grade, hora) : null;
-    const caixas = Math.max(1, ...envios.filter((e) => !e.erro).map((e) => e.caixa ?? 1));
+    const caixas = Math.max(1, ...envios.filter((e) => !e.erro && !e.retiradaEm).map((e) => e.caixa ?? 1));
 
     const corpo: DiaNoticias = {
       data,
@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
         id: e.id,
         titulo: e.titulo,
         caixa: e.caixa ?? 1,
-        etapa: e.erro ? "parado" : e.unidadeId ? "no-plano" : e.grupoId ? "em-aprovacao" : "propagando",
+        etapa: e.retiradaEm ? "retirada" : e.erro ? "parado" : e.unidadeId ? "no-plano" : e.grupoId ? "em-aprovacao" : "propagando",
         noAr: Boolean(e.grupoId && noAr.has(e.grupoId)),
         miniatura: e.materiais[0],
         ...(e.erro ? { erro: e.erro } : {}),
@@ -132,7 +132,7 @@ export async function PUT(req: NextRequest) {
    * mostrando horários que não são os do ar.
    */
   const { envios } = await enviosDoDia(data);
-  const caixas = Math.max(1, ...envios.filter((e) => !e.erro).map((e) => e.caixa ?? 1));
+  const caixas = Math.max(1, ...envios.filter((e) => !e.erro && !e.retiradaEm).map((e) => e.caixa ?? 1));
   if (n < caixas) {
     return Response.json(
       { error: `O dia tem ${caixas} pack(s) com notícia, e os horários descrevem ${n}.` },

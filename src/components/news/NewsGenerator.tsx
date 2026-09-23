@@ -7,7 +7,14 @@ import { useToast } from "@/components/useToast";
 import type { DiaNoticias } from "@/app/api/noticias/dia/route";
 import { NewsBoxes } from "@/components/news/NewsBoxes";
 import { kumaFilename } from "@/lib/kuma/filename";
-import { ajustarCortes, cortesPadrao, INICIO_DIA, MAX_CAIXAS } from "@/lib/kuma/noticiaCaixas";
+import {
+  ajustarCortes,
+  caixaDaHora,
+  cortesDeDuasHoras,
+  cortesPadrao,
+  INICIO_DIA,
+  MAX_CAIXAS,
+} from "@/lib/kuma/noticiaCaixas";
 import { drawCard, proxiedImage, renderJpeg, type TitleFit } from "@/lib/news/draw";
 import { parseFeed } from "@/lib/news/feed";
 import {
@@ -101,7 +108,7 @@ export function NewsGenerator() {
   const enviadosPorCaixa = useMemo(() => {
     const m = new Map<number, number>();
     for (const e of dia?.envios ?? []) {
-      if (e.etapa !== "parado") m.set(e.caixa, (m.get(e.caixa) ?? 0) + 1);
+      if (e.etapa !== "parado" && e.etapa !== "retirada") m.set(e.caixa, (m.get(e.caixa) ?? 0) + 1);
     }
     return m;
   }, [dia]);
@@ -112,7 +119,17 @@ export function NewsGenerator() {
    * a última caixa abre a próxima sozinho, que é o "marquei oito, virou duas
    * caixas". Notícia marcada com as caixas todas cheias fica sem caixa, e não
    * vai no envio.
+   *
+   * A busca começa no pack da hora, e não no 1: com o dia trocando de pack a
+   * cada duas horas, a vaga que sobrou num pack da manhã (ou que uma retirada
+   * abriu) não passa mais na tela, e a notícia cairia nela sem ninguém notar.
+   * Na madrugada, antes do pack 1, tudo ainda está por vir.
    */
+  const inicio = inicioLocal ?? dia?.inicio ?? INICIO_DIA;
+  const primeiraAberta =
+    dia && dia.hora >= inicio
+      ? caixaDaHora(cortesLocal ?? dia.cortesGravados ?? dia.cortes, dia.hora, inicio)
+      : 1;
   const alocacao = useMemo(() => {
     const m = new Map<number, number>();
     const ocupadas = (c: number) =>
@@ -124,7 +141,7 @@ export function NewsGenerator() {
     }
     for (const i of fila) {
       if (m.has(i)) continue;
-      for (let c = 1; c <= MAX_CAIXAS; c++) {
+      for (let c = primeiraAberta; c <= MAX_CAIXAS; c++) {
         if (ocupadas(c) < vagas) {
           m.set(i, c);
           break;
@@ -132,7 +149,7 @@ export function NewsGenerator() {
       }
     }
     return m;
-  }, [queue, escolhidas, enviadosPorCaixa, vagas]);
+  }, [queue, escolhidas, enviadosPorCaixa, vagas, primeiraAberta]);
 
   const caixas = Math.max(
     1,
@@ -140,7 +157,6 @@ export function NewsGenerator() {
     ...enviadosPorCaixa.keys(),
     ...alocacao.values(),
   );
-  const inicio = inicioLocal ?? dia?.inicio ?? INICIO_DIA;
   const cortes = ajustarCortes(
     cortesLocal ?? dia?.cortesGravados ?? cortesPadrao(caixas, inicio),
     caixas,
@@ -172,6 +188,18 @@ export function NewsGenerator() {
     if (caixa > caixasManual) setCaixasManual(caixa);
   };
 
+  /** Um pack a cada duas horas, do início ao fim do dia. */
+  const deDuasEmDuas = () => {
+    const grade = cortesDeDuasHoras(inicio);
+    const comNoticia = Math.max(1, ...enviadosPorCaixa.keys(), ...alocacao.values());
+    if (grade.length + 1 < comNoticia) {
+      toast(`O dia já tem notícia no pack ${comNoticia}, e de 2 em 2 h cabem ${grade.length + 1}.`, "err");
+      return;
+    }
+    setCaixasManual(grade.length + 1);
+    setCortesLocal(grade);
+  };
+
   const salvarHorarios = async () => {
     setBusy(true);
     try {
@@ -188,6 +216,31 @@ export function NewsGenerator() {
       await carregarDia();
     } catch (e) {
       toast(`Erro ao salvar horários: ${e instanceof Error ? e.message : e}`, "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const retirar = async (id: string, titulo: string) => {
+    const ok = window.confirm(
+      `Tirar do pack “${titulo.slice(0, 80)}”?\n\n` +
+        "Ela sai do ar e a vaga fica livre para outra notícia. Não dá para desfazer: " +
+        "para voltar, é preciso enviar de novo.",
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/noticias/retirar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const corpo = await r.json();
+      if (!r.ok) throw new Error(corpo?.error ?? `HTTP ${r.status}`);
+      toast("Notícia tirada do pack — a vaga está livre", "ok");
+      await carregarDia();
+    } catch (e) {
+      toast(`Não deu para tirar: ${e instanceof Error ? e.message : e}`, "err");
     } finally {
       setBusy(false);
     }
@@ -809,9 +862,11 @@ export function NewsGenerator() {
         horariosPendentes={horariosPendentes}
         onMover={moverParaCaixa}
         onRemover={(i) => toggleQueue(i)}
+        onRetirar={(id, titulo) => void retirar(id, titulo)}
         onSelecionar={(i) => setSelIdx(i)}
         onCortes={setCortesLocal}
         onInicio={setInicioLocal}
+        onDuasHoras={deDuasEmDuas}
         onNovaCaixa={() => setCaixasManual(Math.min(caixas + 1, MAX_CAIXAS))}
         onRemoverCaixa={(c) => setCaixasManual(Math.max(1, c - 1))}
         onEnviar={() => void enviarParaKuma()}

@@ -16,7 +16,10 @@ import { caixaDaHora as caixaPedida, FIM_DIA, rotuloHora } from "@/lib/kuma/noti
  * se arrasta: o envio já tem grupo criativo com a caixa gravada.
  */
 
-export const CORES_CAIXA = ["#5ce3ff", "#b18cff", "#ffb347", "#7dff9a"];
+export const CORES_CAIXA = [
+  "#5ce3ff", "#b18cff", "#ffb347", "#7dff9a", "#ff7ab6", "#ffe066",
+  "#6f9bff", "#ff8f6b", "#4de0c0", "#d78cff", "#c6f06b", "#ffa8d0",
+];
 
 type Props = {
   items: NewsItem[];
@@ -35,10 +38,13 @@ type Props = {
   horariosPendentes: boolean;
   onMover: (item: number, caixa: number, trocarCom?: number) => void;
   onRemover: (item: number) => void;
+  /** Tira do pack uma notícia já enviada. */
+  onRetirar: (id: string, titulo: string) => void;
   onSelecionar: (item: number) => void;
   onCortes: (cortes: number[]) => void;
   onInicio: (inicio: number) => void;
   onNovaCaixa: () => void;
+  onDuasHoras: () => void;
   onRemoverCaixa: (caixa: number) => void;
   onEnviar: () => void;
   onSalvarHorarios: () => void;
@@ -50,6 +56,7 @@ const ETAPA: Record<EnvioDoDia["etapa"], { rotulo: string; classe: string }> = {
   "em-aprovacao": { rotulo: "Em aprovação", classe: "apr" },
   "no-plano": { rotulo: "Aprovada", classe: "ok" },
   parado: { rotulo: "Parada", classe: "err" },
+  retirada: { rotulo: "Retirada", classe: "err" },
 };
 
 /*
@@ -65,7 +72,8 @@ export function NewsBoxes(p: Props) {
   const [alvo, setAlvo] = useState<number | null>(null);
   const trilho = useRef<HTMLDivElement>(null);
 
-  const enviados = (p.dia?.envios ?? []).filter((e) => e.etapa !== "parado");
+  const enviados = (p.dia?.envios ?? []).filter((e) => e.etapa !== "parado" && e.etapa !== "retirada");
+  const retiradas = (p.dia?.envios ?? []).filter((e) => e.etapa === "retirada");
   const parados = (p.dia?.envios ?? []).filter((e) => e.etapa === "parado");
   const pendentes = [...p.alocacao.entries()];
   const hora = p.dia?.hora ?? null;
@@ -157,6 +165,10 @@ export function NewsBoxes(p: Props) {
         </div>
 
         <div className="boxes-acoes">
+          <button className="btn btn-ghost btn-sm" onClick={p.onDuasHoras} disabled={p.busy}
+            title="Divide o dia em packs de 2 horas, a partir do início do pack 1">
+            De 2 em 2 h
+          </button>
           <button className="btn btn-ghost btn-sm" onClick={p.onAtualizar} disabled={p.carregando}
             title="Relê o que já foi enviado hoje">
             {p.carregando ? <span className="spinner" /> : "↻"}
@@ -319,6 +331,14 @@ export function NewsBoxes(p: Props) {
                           {e.noAr ? "● No ar" : ETAPA[e.etapa].rotulo}
                         </span>
                         <span className="slot-tit">{e.titulo}</span>
+                        <button
+                          className="slot-x"
+                          onClick={() => p.onRetirar(e.id, e.titulo)}
+                          disabled={p.busy}
+                          title="Tirar do pack — sai do ar e libera a vaga"
+                        >
+                          ×
+                        </button>
                       </div>
                     ))}
 
@@ -407,6 +427,11 @@ export function NewsBoxes(p: Props) {
             o sistema passa o próximo pack para o Kuma, que leva à tela na virada da faixa de
             programação dele.
             {volta && <> Antes das {rotuloHora(p.inicio)} segue no ar o pack {p.caixas}, o último do dia.</>}
+            {retiradas.length > 0 && (
+              <span>
+                {" "}{retiradas.length} retirada{retiradas.length === 1 ? "" : "s"} do pack hoje.
+              </span>
+            )}
             {parados.length > 0 && (
               <span className="boxes-parados">
                 {" "}⚠ {parados.length} envio{parados.length === 1 ? "" : "s"} parado{parados.length === 1 ? "" : "s"}:{" "}

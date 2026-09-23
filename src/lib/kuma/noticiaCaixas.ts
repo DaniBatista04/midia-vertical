@@ -33,12 +33,15 @@ import { gruposParaEstrategia, slotsDaFrequencia } from "./noticiaPlano";
  * Quantas caixas cabem num dia.
  *
  * O Kuma programa em faixas de duas horas, e a troca só chega à tela na virada
- * de uma delas. Com o dia das telas indo das 6h à meia-noite, quatro caixas já
- * dão janelas de quatro a seis horas; mais que isso e cada caixa ficaria no ar
- * por uma ou duas faixas, com a troca atrasando uma faixa inteira por conta do
- * Kuma.
+ * de uma delas. Doze é o dia inteiro trocando a cada faixa — o que a direção
+ * pediu em 23/09/2026, notícias mudando de duas em duas horas. Caixa mais curta
+ * que uma faixa não chegaria a aparecer inteira.
+ *
+ * Mais caixas não ocupam mais tela: a unidade é uma só e reserva as mesmas
+ * vagas o dia inteiro, e a caixa é só a lista que vai na estratégia naquela
+ * janela.
  */
-export const MAX_CAIXAS = 4;
+export const MAX_CAIXAS = 12;
 
 /**
  * Onde o dia começa e termina para a divisão das janelas, em horas cheias.
@@ -171,6 +174,17 @@ export function ajustarCortes(cortes: number[], n: number, inicio: number = INIC
     novos.push(meio);
   }
   return novos;
+}
+
+/**
+ * O dia em caixas de duas horas a partir do início — uma por faixa do Kuma, o
+ * que a direção pediu. A última fica com o que sobrar (uma hora, com início
+ * ímpar), e o número de caixas é limitado por `MAX_CAIXAS`.
+ */
+export function cortesDeDuasHoras(inicio: number = INICIO_DIA): number[] {
+  const cortes: number[] = [];
+  for (let h = inicio + 2; h < FIM_DIA && cortes.length < MAX_CAIXAS - 1; h += 2) cortes.push(h);
+  return cortes;
 }
 
 /**

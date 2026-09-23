@@ -114,8 +114,12 @@ async function estrategiaAgora(
   return estrategiaDaHora(plano, grade, horaEmSaoPaulo());
 }
 
-/** Onde a notícia foi amarrada, ou o motivo de ela não ter sido. */
-type Amarracao = { unidadeId: string; telas: number } | { motivo: string };
+/**
+ * Onde a notícia foi amarrada, ou o motivo de ela não ter sido. `retirada` é a
+ * operação ter tirado a notícia no meio da volta: o envio já está marcado, e
+ * gravar o `erro` por cima com o registro lido antes apagaria a marca.
+ */
+type Amarracao = { unidadeId: string; telas: number } | { motivo: string; retirada?: true };
 
 /**
  * Abre a unidade do dia e amarra nela a primeira notícia.
@@ -347,6 +351,13 @@ async function entrarNoPlano(
   const caixaDoGrupo = { ...plano.caixaDoGrupo, [grupoId]: caixa };
   const agora = new Date().toISOString();
   await gravarPlano({ ...plano, criandoEm: agora });
+
+  // A operação pode ter tirado a notícia do pack depois que esta volta leu o
+  // envio. Conferido já com a trava do plano de pé, que faz a retirada esperar.
+  if ((await lerNoticia(id))?.retiradaEm) {
+    await gravarPlano({ ...plano, criandoEm: undefined });
+    return { motivo: "retirada do pack pelo painel", retirada: true };
+  }
   await gravar({ ...estado, criandoEm: agora });
 
   const { estrategia, caixa: noAr } = await estrategiaAgora({ ...plano, grupos, caixaDoGrupo });
@@ -515,6 +526,7 @@ export async function avancarNoticia(
   const id = estado.id;
 
   if (estado.erro) return { estado: "parado", id, motivo: estado.erro };
+  if (estado.retiradaEm) return { estado: "parado", id, motivo: "retirada do pack pelo painel" };
 
   /* ── 1. Ainda propagando? ─────────────────────────────────── */
   if (!estado.grupoId) {
@@ -623,6 +635,7 @@ export async function avancarNoticia(
         });
 
   if ("motivo" in amarracao) {
+    if (amarracao.retirada) return { estado: "parado", id, motivo: amarracao.motivo };
     await gravar({ ...estado, erro: amarracao.motivo, criandoEm: undefined });
     log(`${id}: ${amarracao.motivo} — envio parado`);
     return { estado: "parado", id, motivo: amarracao.motivo };
@@ -643,6 +656,107 @@ export async function avancarNoticia(
     unidadeId: amarracao.unidadeId,
     telas: amarracao.telas,
   };
+}
+
+export type Retirada =
+  | { estado: "retirada"; id: string; caixaNoAr: number | null }
+  | { estado: "recusada"; id: string; motivo: string; status: 404 | 409 };
+
+/**
+ * Tira uma notícia do pack: o grupo sai do plano, e a estratégia é reescrita se
+ * ele estava no ar. É o que a operação usa para abrir vaga para uma notícia
+ * urgente num pack cheio.
+ *
+ * O envio é marcado (`retiradaEm`) **antes** de o plano ser lido, e é essa marca
+ * que tira o envio da varredura do cron: uma notícia ainda em aprovação não entra
+ * mais quando for aprovada. Se o cron já tinha lido o envio antes da marca, ele
+ * confere de novo em `entrarNoPlano`, depois de pegar a trava do plano — e a
+ * trava de pé faz esta função recusar e desfazer a marca. A unidade não muda — nenhuma tela é liberada nem
+ * travada, só a lista da estratégia.
+ *
+ * Duas recusas:
+ *  - a notícia está entrando no plano neste minuto (a marca do envio ou do
+ *    plano está de pé), e mexer agora deixaria o registro e a unidade
+ *    descrevendo listas diferentes; o painel pede para tentar de novo; e
+ *  - é a última notícia do plano do dia. Unidade sem criativo trava as telas e
+ *    não exibe nada, e cancelar a unidade é decisão do portal, não de um botão.
+ */
+export async function retirarNoticia(
+  id: string,
+  opts: { cfg?: KumaConfig; log?: (m: string) => void } = {},
+): Promise<Retirada> {
+  const log = opts.log ?? (() => {});
+  const estado = await lerNoticia(id);
+  if (!estado) return { estado: "recusada", id, motivo: `envio ${id} não existe`, status: 404 };
+  if (estado.retiradaEm) return { estado: "retirada", id, caixaNoAr: null };
+
+  const vivo = (marca?: string) =>
+    Boolean(marca) && Date.now() - Date.parse(marca!) < LEASE_SEGUNDOS * 1_000;
+  const espere = { estado: "recusada", id, status: 409 } as const;
+  if (vivo(estado.criandoEm)) {
+    return { ...espere, motivo: "a notícia está entrando no plano agora — tente de novo em um minuto" };
+  }
+
+  await gravar({ ...estado, retiradaEm: new Date().toISOString() });
+  const desfazer = async (motivo: string): Promise<Retirada> => {
+    await gravar({ ...estado, retiradaEm: undefined });
+    return { ...espere, motivo };
+  };
+
+  // O plano pode ser o da data do envio ou o de hoje: aprovação que atravessa a
+  // meia-noite entra no plano do dia novo (ver `avancarNoticia`).
+  const datas = [...new Set([estado.data, dataEmSaoPaulo(0)])];
+  let plano: PlanoNoticias | null = null;
+  for (const d of datas) {
+    const p = await lerJson<PlanoNoticias>(caminhoPlanoNoticias(d));
+    if (vivo(p?.criandoEm)) {
+      return desfazer("o plano do dia está sendo atualizado — tente de novo em um minuto");
+    }
+    if (estado.grupoId && p?.grupos.includes(estado.grupoId)) plano = p;
+  }
+
+  const grupos = plano ? plano.grupos.filter((g) => g !== estado.grupoId) : [];
+  if (plano && !grupos.length) {
+    return desfazer(
+      "é a única notícia no plano do dia, e unidade sem criativo trava as telas — " +
+        "envie outra notícia e tire esta depois que a nova for aprovada",
+    );
+  }
+
+  if (!plano) {
+    log(`${id}: retirada antes de entrar no plano`);
+    return { estado: "retirada", id, caixaNoAr: null };
+  }
+
+  const caixaDoGrupo = { ...plano.caixaDoGrupo };
+  delete caixaDoGrupo[estado.grupoId!];
+  const novo = { ...plano, grupos, caixaDoGrupo };
+  const { estrategia, caixa } = await estrategiaAgora(novo);
+
+  // Plano de outro dia não exibe mais nada: só o registro muda.
+  const noAr = plano.data === dataEmSaoPaulo(0) && plano.unidadeId;
+  if (noAr && !mesmaEstrategia(plano.estrategia, estrategia)) {
+    const conta = process.env.KUMA_BIDDER_NEWS?.trim();
+    if (!conta) {
+      throw new Error("KUMA_BIDDER_NEWS não configurada — sem ela a estratégia iria para a conta do clima.");
+    }
+    await gravarPlano({ ...plano, criandoEm: new Date().toISOString() });
+    try {
+      await createOrderStrategy(plano.unidadeId!, estrategia, opts.cfg ?? kumaConfig(conta));
+    } catch (e) {
+      // A notícia continua no plano e no ar; a marca sai para ela poder ser
+      // retirada de novo.
+      await gravarPlano({ ...plano, criandoEm: undefined }).catch(() => {});
+      await gravar({ ...estado, retiradaEm: undefined }).catch(() => {});
+      throw e;
+    }
+    await gravarPlano({ ...novo, estrategia, atualizadoEm: new Date().toISOString(), criandoEm: undefined });
+    log(`${id}: retirada do plano ${plano.unidadeId} — no ar fica o pack ${caixa}`);
+  } else {
+    await gravarPlano({ ...novo, atualizadoEm: new Date().toISOString() });
+    log(`${id}: retirada do plano ${plano.unidadeId ?? plano.data} — a estratégia no ar não muda`);
+  }
+  return { estado: "retirada", id, caixaNoAr: noAr ? caixa : null };
 }
 
 /** Uma linha legível por passo, para log e para a tela. */

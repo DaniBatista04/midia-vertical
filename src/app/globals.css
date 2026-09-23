@@ -1528,7 +1528,8 @@ input[type="range"]::-moz-range-thumb {
   opacity: 0;
   transition: opacity 0.12s ease;
 }
-.slot.pendente:hover .slot-x {
+.slot.pendente:hover .slot-x,
+.slot.enviado:hover .slot-x {
   opacity: 1;
 }
 .slot-x:hover {

@@ -121,8 +121,10 @@ mesma duração.
 Para passar de quatro, o dia se divide em **packs** de até quatro notícias
 (no código, `caixa` — o painel mostra "pack"),
 cada uma com a sua janela — oito notícias viram duas caixas, a primeira até as
-16h e a segunda depois. São até quatro caixas, e a divisão do dia vai das 6h à
-meia-noite, com os cortes padrão em hora par. A **Programação do dia**, embaixo dos
+16h e a segunda depois. São até doze caixas — o dia inteiro trocando de duas em
+duas horas, que o botão **De 2 em 2 h** monta de uma vez —, e a divisão do dia
+vai das 6h à meia-noite, com os cortes padrão em hora par. Mais caixas não
+ocupam mais tela: a unidade é a mesma, e a caixa é só a lista da estratégia. A **Programação do dia**, embaixo dos
 previews, mostra a linha do tempo e as caixas: marcar notícia na fila enche a
 primeira caixa com vaga (e abre a seguinte), dá para arrastar notícia entre
 caixas e arrastar o divisor para mudar o horário da troca, de hora em hora
@@ -130,6 +132,15 @@ caixas e arrastar o divisor para mudar o horário da troca, de hora em hora
 vira em hora par). O início do pack 1 também se arrasta (padrão 6h): antes dele fica no ar o **último** pack do dia,
 dando a volta no relógio — a unidade não tem `hours`, então a madrugada nunca
 fica sem notícia, e segue com o pack da noite até o da manhã entrar.
+
+Notícia já enviada sai do pack pelo × no card (`POST /api/noticias/retirar`,
+`retirarNoticia`): o grupo sai do plano, a estratégia é reescrita se ele estava
+no ar, e a vaga fica livre — é o caminho para encaixar uma notícia urgente num
+pack cheio. O envio fica marcado com `retiradaEm` e o cron não o leva mais ao
+ar, nem se o criativo for aprovado depois. A última notícia do plano do dia não
+sai: unidade sem criativo trava as telas. Notícia marcada na fila cai no
+primeiro pack com vaga **a partir do pack da hora**, para não ir parar numa vaga
+de um pack que já passou.
 
 A unidade continua **uma por dia**. A API não tem estratégia por hora, então
 quem vira a caixa é o cron de minuto: `sincronizarEstrategia` confere qual caixa

@@ -54,6 +54,15 @@ export type EstadoNoticia = {
    * repetir a mesma falha a cada minuto; quem opera vê o motivo e decide.
    */
   erro?: string;
+
+  /**
+   * Quando a operação tirou a notícia do pack pelo painel.
+   *
+   * É o fim do envio, como `erro`: o grupo sai do plano, e o cron para de mexer
+   * nele — se o criativo ainda estava na Análise Criativa, aprovar depois não o
+   * leva ao ar. Libera a vaga do pack para outra notícia.
+   */
+  retiradaEm?: string;
 };
 
 export const PREFIXO_NOTICIAS = "noticias/estado";
