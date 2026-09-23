@@ -16,13 +16,13 @@
  * sendo uma por dia, e o que muda na virada da janela é a estratégia: o cron de
  * minuto confere qual caixa é a da hora e reescreve a lista quando ela muda.
  *
- * Isso já foi para as telas uma vez. Entre 01 e 03/09/2026 o cron trocava a
- * estratégia a cada meia hora, e a troca chegou aos players sem ninguém clicar
- * em Liberar — só que na virada da faixa de programação do Kuma, não no minuto
- * da chamada. Para rodízio de meia hora isso era defeito; para caixa, que ocupa
- * uma janela de horas, é o comportamento certo. E dentro da caixa as quatro
- * notícias continuam dividindo a estratégia, uma por exibição — o que a
- * operação recusou naquela época foi uma notícia só segurando a janela.
+ * **A estratégia reescrita não chega sozinha à tela.** Em 23/09/2026 a
+ * operação confirmou no campo que a lista nova só aparece depois do City Lock e
+ * da publicação no portal. (Até então se acreditava no contrário, com base no
+ * rodízio de 01–03/09 — uma leitura que nunca foi medida com horário de tela.)
+ * O cron troca a caixa no Kuma na hora certa, mas a tela só muda na publicação
+ * seguinte. Dentro da caixa as notícias continuam dividindo a estratégia, uma
+ * por exibição.
  *
  * Módulo puro, sem rede: quem lê e grava é o `publicarNoticia.ts`.
  */
@@ -64,6 +64,36 @@ export function vagasPorCaixa(frequencia: number): number {
   return slotsDaFrequencia(frequencia);
 }
 
+/** Os tamanhos servem para `n` caixas? Um inteiro por caixa, de 1 até o teto da frequência. */
+export function vagasValidas(vagas: unknown, n: number, frequencia: number): vagas is number[] {
+  const teto = vagasPorCaixa(frequencia);
+  return (
+    Array.isArray(vagas) &&
+    vagas.length <= n &&
+    vagas.every((v) => Number.isInteger(v) && v >= 1 && v <= teto)
+  );
+}
+
+/** Quantos dias à frente o painel deixa agendar. */
+export const DIAS_AGENDA = 6;
+
+/**
+ * As vagas de uma caixa, com o tamanho que o operador escolheu na grade.
+ *
+ * Caixa menor é o "menos notícias, mais tempo para cada": com 240 exibições,
+ * duas vagas dão 120 a cada notícia. O tamanho nunca passa do que a frequência
+ * comporta, e caixa sem tamanho gravado tem todas as vagas.
+ */
+export function vagasDaCaixa(
+  grade: Pick<GradeNoticias, "vagas"> | null,
+  caixa: number,
+  frequencia: number,
+): number {
+  const teto = vagasPorCaixa(frequencia);
+  const escolhido = grade?.vagas?.[caixa - 1];
+  return Number.isInteger(escolhido) && escolhido! >= 1 ? Math.min(escolhido!, teto) : teto;
+}
+
 /**
  * Horários de troca escolhidos para um dia.
  *
@@ -80,6 +110,11 @@ export type GradeNoticias = {
    * grades de antes do campo, que valem como `INICIO_DIA`.
    */
   inicio?: number;
+  /**
+   * Tamanho de cada caixa (vagas), na ordem. Ausente, ou mais curto que as
+   * caixas, vale o máximo que a frequência comporta (ver `vagasDaCaixa`).
+   */
+  vagas?: number[];
   atualizadoEm: string;
 };
 

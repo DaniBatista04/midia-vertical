@@ -34,7 +34,6 @@ import {
 import { cidadesConfiguradas, siglaCidade } from "./cidades";
 import {
   dataEmSaoPaulo,
-  FREQUENCIA_PADRAO,
   inventarioEmLotes,
   nomeDoPlano,
   nomearPlano,
@@ -43,6 +42,7 @@ import {
 import { montarGrupoNoticia } from "./newsGroup";
 import {
   caminhoPlanoNoticias,
+  frequenciaDaNoticia,
   mesmaEstrategia,
   type PlanoNoticias,
 } from "./noticiaPlano";
@@ -51,7 +51,7 @@ import {
   estrategiaDaHora,
   gruposPorCaixa,
   horaEmSaoPaulo,
-  vagasPorCaixa,
+  vagasDaCaixa,
   type EstrategiaDaHora,
   type GradeNoticias,
 } from "./noticiaCaixas";
@@ -112,7 +112,10 @@ async function estrategiaAgora(
   plano: Pick<PlanoNoticias, "data" | "grupos" | "caixaDoGrupo" | "frequencia">,
 ): Promise<EstrategiaDaHora> {
   const grade = await lerJson<GradeNoticias>(caminhoGrade(plano.data));
-  return estrategiaDaHora(plano, grade, horaEmSaoPaulo());
+  // Plano de um dia que ainda não chegou começa pelo que toca à meia-noite dele
+  // (a madrugada, que é da última caixa); a hora de hoje não diz nada sobre ele.
+  const hora = plano.data > dataEmSaoPaulo(0) ? 0 : horaEmSaoPaulo();
+  return estrategiaDaHora(plano, grade, hora);
 }
 
 /**
@@ -306,7 +309,7 @@ async function entrarNoPlano(
   const { cfg, log, frequencia } = opts;
   const id = estado.id;
   const caixa = estado.caixa ?? 1;
-  const vagas = vagasPorCaixa(frequencia);
+  const vagas = vagasDaCaixa(await lerJson<GradeNoticias>(caminhoGrade(plano.data)), caixa, frequencia);
 
   // Reentrância: a estratégia já foi trocada numa volta anterior e o que faltou
   // foi gravar o envio. Repetir a chamada não estragaria nada, mas nada mudaria.
@@ -578,7 +581,7 @@ export async function avancarNoticia(
 
   /* ── 4. Entrar no plano do dia ────────────────────────────── */
   const cidades = cidadesConfiguradas(process.env.KUMA_CLIMA_CIDADE);
-  const frequencia = Number(process.env.KUMA_CLIMA_FREQUENCIA ?? FREQUENCIA_PADRAO);
+  const frequencia = frequenciaDaNoticia();
 
   const emCurso = estado.criandoEm ? Date.parse(estado.criandoEm) : 0;
   if (emCurso && Date.now() - emCurso < LEASE_SEGUNDOS * 1_000) {

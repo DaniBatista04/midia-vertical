@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 
-import { dataEmSaoPaulo, FREQUENCIA_PADRAO } from "@/lib/kuma/agendar";
+import { dataEmSaoPaulo } from "@/lib/kuma/agendar";
 import {
   caminhoGrade,
   cortesDoDia,
@@ -11,9 +11,10 @@ import {
   inicioValido,
   MAX_CAIXAS,
   vagasPorCaixa,
+  vagasValidas,
   type GradeNoticias,
 } from "@/lib/kuma/noticiaCaixas";
-import { caminhoPlanoNoticias, type PlanoNoticias } from "@/lib/kuma/noticiaPlano";
+import { caminhoPlanoNoticias, frequenciaDaNoticia, type PlanoNoticias } from "@/lib/kuma/noticiaPlano";
 import type { TesteIgnoreLock } from "@/lib/kuma/noticiaEstado";
 import { enviosDoDia, GRACA_SEGUNDOS } from "@/lib/kuma/publicarNoticia";
 import { lerJson, uploadPublico } from "@/lib/server/supabaseUpload";
@@ -25,9 +26,10 @@ export const dynamic = "force-dynamic";
  * O dia das notícias como o painel desenha: as caixas, os horários de troca e
  * em que ponto cada envio está.
  *
- * `GET` lê; `PUT` muda os horários de troca de um dia que já tem notícia
- * enviada. Quem vira a caixa é o cron de minuto (`/api/noticias/agendar`), que
- * lê a mesma grade — mudar um horário aqui chega à estratégia na volta seguinte.
+ * `GET` lê; `PUT` grava a grade de um dia — hoje ou um dos agendados —, que o
+ * painel manda sozinho a cada mudança. Quem vira a caixa é o cron de minuto
+ * (`/api/noticias/agendar`), que lê a mesma grade: mudar um horário aqui chega à
+ * estratégia na volta seguinte (e à tela, só na publicação do portal).
  */
 
 export type EtapaEnvio = "propagando" | "em-aprovacao" | "no-plano" | "parado" | "retirada";
@@ -52,6 +54,14 @@ export type EnvioDoDia = {
 
 export type DiaNoticias = {
   data: string;
+  /** `data` é hoje em São Paulo: só então há "agora", pack no ar e janela encerrada. */
+  hoje: boolean;
+  /** Exibições/dia da unidade de notícia (no máximo 240, múltiplo de 60). */
+  frequencia: number;
+  /** Tamanho gravado de cada pack; o que faltar tem `vagas`. */
+  vagasGravadas: number[] | null;
+  /** Quando a grade do dia foi gravada por último. */
+  gradeAtualizadaEm: string | null;
   /** Hora de São Paulo, fracionária. */
   hora: number;
   vagas: number;
@@ -101,14 +111,19 @@ export async function GET(req: NextRequest) {
       lerJson<PlanoNoticias>(caminhoPlanoNoticias(data)),
     ]);
 
-    const frequencia = Number(process.env.KUMA_CLIMA_FREQUENCIA ?? FREQUENCIA_PADRAO);
+    const frequencia = frequenciaDaNoticia();
     const hora = horaEmSaoPaulo();
+    const hoje = data === dataEmSaoPaulo(0);
     const noAr = new Set(plano?.estrategia ?? []);
-    const agora = plano?.grupos.length ? estrategiaDaHora(plano, grade, hora) : null;
+    const agora = hoje && plano?.grupos.length ? estrategiaDaHora(plano, grade, hora) : null;
     const caixas = Math.max(1, ...envios.filter((e) => !e.erro && !e.retiradaEm && !e.teste).map((e) => e.caixa ?? 1));
 
     const corpo: DiaNoticias = {
       data,
+      hoje,
+      frequencia,
+      vagasGravadas: grade?.vagas ?? null,
+      gradeAtualizadaEm: grade?.atualizadoEm ?? null,
       hora,
       vagas: vagasPorCaixa(frequencia),
       maxCaixas: MAX_CAIXAS,
@@ -160,10 +175,15 @@ export async function PUT(req: NextRequest) {
   const data = dataPedida(req);
   if (!data) return Response.json({ error: "Data inválida — use YYYY-MM-DD." }, { status: 400 });
 
+  if (data < dataEmSaoPaulo(0)) {
+    return Response.json({ error: `${data} já passou — a grade dele não muda mais.` }, { status: 400 });
+  }
+
   let cortes: unknown;
   let inicio: unknown;
+  let vagas: unknown;
   try {
-    ({ cortes, inicio } = (await req.json()) as { cortes?: unknown; inicio?: unknown });
+    ({ cortes, inicio, vagas } = (await req.json()) as { cortes?: unknown; inicio?: unknown; vagas?: unknown });
   } catch {
     return Response.json({ error: "Requisição inválida." }, { status: 400 });
   }
@@ -180,19 +200,38 @@ export async function PUT(req: NextRequest) {
    * mais curta seria ignorada pelo cron (ver `cortesDoDia`), e o painel ficaria
    * mostrando horários que não são os do ar.
    */
+  const frequencia = frequenciaDaNoticia();
+  if (vagas !== undefined && !vagasValidas(vagas, n, frequencia)) {
+    return Response.json({ error: `Tamanho dos packs inválido: ${JSON.stringify(vagas)}.` }, { status: 400 });
+  }
+
   const { envios } = await enviosDoDia(data);
-  const caixas = Math.max(1, ...envios.filter((e) => !e.erro && !e.retiradaEm && !e.teste).map((e) => e.caixa ?? 1));
+  const vivos = envios.filter((e) => !e.erro && !e.retiradaEm && !e.teste);
+  const caixas = Math.max(1, ...vivos.map((e) => e.caixa ?? 1));
   if (n < caixas) {
     return Response.json(
       { error: `O dia tem ${caixas} pack(s) com notícia, e os horários descrevem ${n}.` },
       { status: 409 },
     );
   }
+  // Pack não encolhe abaixo das notícias que já tem.
+  if (Array.isArray(vagas)) {
+    for (const [k, v] of (vagas as number[]).entries()) {
+      const ja = vivos.filter((e) => (e.caixa ?? 1) === k + 1).length;
+      if (ja > v) {
+        return Response.json(
+          { error: `O pack ${k + 1} já tem ${ja} notícia(s) — não dá para deixá-lo com ${v} vaga(s).` },
+          { status: 409 },
+        );
+      }
+    }
+  }
 
   const grade: GradeNoticias = {
     data,
     cortes,
     ...(inicio !== undefined ? { inicio } : {}),
+    ...(Array.isArray(vagas) ? { vagas: vagas as number[] } : {}),
     atualizadoEm: new Date().toISOString(),
   };
   await uploadPublico({

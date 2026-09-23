@@ -141,6 +141,22 @@ export function slotsDaFrequencia(frequencia: number): number {
   return Math.max(1, Math.floor(frequencia / 60));
 }
 
+/** Teto de exibições/dia de uma unidade de notícia — combinado com a operação. */
+export const FREQUENCIA_MAX_NOTICIA = 240;
+
+/**
+ * As exibições/dia da unidade de notícia: **no máximo 240, em múltiplos de 60**
+ * (23/09/2026). Cada notícia fica com uma fatia múltipla de 60 — quatro com 60,
+ * duas com 120 —, e é isso que a regra do divisor da Brato exige de qualquer
+ * jeito. `KUMA_NOTICIA_FREQUENCIA` pode baixar o valor; nada passa do teto, e o
+ * que não for múltiplo de 60 é arredondado para baixo.
+ */
+export function frequenciaDaNoticia(valor = process.env.KUMA_NOTICIA_FREQUENCIA): number {
+  const pedido = Number(valor ?? FREQUENCIA_MAX_NOTICIA);
+  const limitado = Number.isFinite(pedido) ? Math.min(pedido, FREQUENCIA_MAX_NOTICIA) : FREQUENCIA_MAX_NOTICIA;
+  return Math.max(60, Math.floor(limitado / 60) * 60);
+}
+
 /**
  * A lista de grupos que vai no `createOrderStrategy`.
  *

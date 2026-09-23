@@ -1034,8 +1034,9 @@ input[type="range"]::-moz-range-thumb {
 }
 .boxes-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 16px;
+  gap: 10px 16px;
   padding: 10px 18px;
   border-bottom: 1px solid #ffffff0d;
 }
@@ -1973,4 +1974,76 @@ input[type="range"]::-moz-range-thumb {
 .teste-log code {
   word-break: break-all;
   color: #8f8f8f;
+}
+
+/* ── Agenda: abas de dia, gravação da grade, tamanho do pack ─── */
+.dias-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: #ffffff0a;
+  border: 1px solid #ffffff10;
+}
+.dia-tab {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: #a8a8a8;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  text-transform: capitalize;
+}
+.dia-tab:hover {
+  color: var(--text);
+}
+.dia-tab.on {
+  background: var(--accent);
+  color: #111;
+}
+.grade-salva {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10.5px;
+  color: #8a8a8a;
+  white-space: nowrap;
+}
+.grade-salva.ok {
+  color: #4cff91;
+}
+.grade-salva.erro {
+  color: var(--red);
+}
+.link-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.dias-linha {
+  order: 9;
+  flex-basis: 100%;
+  display: flex;
+}
+.bx-vagas {
+  flex: none;
+  width: auto;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid #ffffff1a;
+  background: #1c1c1c;
+  color: var(--muted);
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.bx-vagas:hover {
+  border-color: var(--c);
+  color: var(--text);
 }

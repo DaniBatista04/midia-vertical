@@ -13,6 +13,7 @@ import {
   caixaDaHora,
   cortesDeDuasHoras,
   cortesPadrao,
+  DIAS_AGENDA,
   INICIO_DIA,
   MAX_CAIXAS,
 } from "@/lib/kuma/noticiaCaixas";
@@ -56,9 +57,20 @@ export function NewsGenerator() {
   const [enviando, setEnviando] = useState<{ feitas: number; total: number; item: number } | null>(null);
   /** Caixa escolhida à mão (arrastando) para uma notícia da fila. */
   const [escolhidas, setEscolhidas] = useState<Map<number, number>>(new Map());
-  const [caixasManual, setCaixasManual] = useState(1);
-  const [cortesLocal, setCortesLocal] = useState<number[] | null>(null);
-  const [inicioLocal, setInicioLocal] = useState<number | null>(null);
+  /** O dia que a programação mostra: hoje, ou um dos próximos, para agendar. */
+  const [dataSel, setDataSel] = useState(() => dataSP(0));
+  const dataRef = useRef(dataSel);
+  /**
+   * A grade que o operador está editando, à frente do servidor. `null` é "vale a
+   * gravada". Toda mudança grava sozinha meio segundo depois da última (ver
+   * `mudarGrade`), e a edição só volta a `null` quando a gravação confirma — uma
+   * releitura que saiu antes não desfaz o que acabou de ser arrastado.
+   */
+  const [gradeLocal, setGradeLocal] = useState<GradeEditavel | null>(null);
+  const [salvamento, setSalvamento] = useState<Salvamento>({ estado: "ok" });
+  const edicao = useRef(0);
+  const gravadaEm = useRef<string | null>(null);
+  const timerSalvar = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([null, null]);
 
@@ -90,22 +102,50 @@ export function NewsGenerator() {
 
   /* ── Programação do dia ──────────────────────────────────── */
   const aplicarDia = useCallback((d: DiaNoticias | null) => {
+    // Resposta de um dia que já não é o selecionado (troca rápida de aba) não entra.
+    if (d && d.data !== dataRef.current) return;
     if (d) {
-      setDia(d);
+      setDia((atual) => {
+        // Releitura que saiu antes da última gravação chega com a grade velha:
+        // fica a que já está na tela.
+        const velha =
+          atual?.data === d.data &&
+          gravadaEm.current !== null &&
+          (d.gradeAtualizadaEm ?? "") < gravadaEm.current;
+        return velha && atual
+          ? {
+              ...d,
+              cortesGravados: atual.cortesGravados,
+              inicio: atual.inicio,
+              vagasGravadas: atual.vagasGravadas,
+              gradeAtualizadaEm: atual.gradeAtualizadaEm,
+            }
+          : d;
+      });
       setDiaLidoEm(Date.now());
     }
     setFalhaDia(!d);
   }, []);
 
   const carregarDia = useCallback(async () => {
-    aplicarDia(await lerDia());
+    aplicarDia(await lerDia(dataRef.current));
     setCarregandoDia(false);
   }, [aplicarDia]);
+
+  const trocarDia = (data: string) => {
+    if (data === dataSel) return;
+    dataRef.current = data;
+    gravadaEm.current = null;
+    setDataSel(data);
+    setDia(null);
+    setGradeLocal(null);
+    setEscolhidas(new Map());
+  };
 
   /*
    * Releitura sozinha: a cada 15 s enquanto alguma notícia está subindo ou
    * esperando aprovação — é quando quem opera está olhando o status mudar —, e a
-   * cada minuto quando está tudo parado.
+   * cada minuto quando está tudo parado. Trocar de dia lê na hora.
    */
   const emAndamento = (dia?.envios ?? []).some(
     (e) => e.etapa === "propagando" || e.etapa === "em-aprovacao",
@@ -114,7 +154,7 @@ export function NewsGenerator() {
     let alive = true;
     let t: ReturnType<typeof setTimeout>;
     const tick = async () => {
-      const d = await lerDia();
+      const d = await lerDia(dataRef.current);
       if (!alive) return;
       aplicarDia(d);
       t = setTimeout(() => void tick(), emAndamento ? 15_000 : 60_000);
@@ -125,11 +165,17 @@ export function NewsGenerator() {
       clearTimeout(t);
     };
     // `dia` fica de fora de propósito: a releitura não reinicia a cada resposta,
-    // só quando o ritmo muda.
+    // só quando o ritmo ou o dia mudam.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [emAndamento, aplicarDia]);
+  }, [emAndamento, aplicarDia, dataSel]);
 
-  const vagas = dia?.vagas ?? 4;
+  /** O teto de vagas por pack que a frequência comporta (4 com 240). */
+  const teto = dia?.vagas ?? 4;
+  const vagasChave = (gradeLocal?.vagas ?? dia?.vagasGravadas ?? []).join(",");
+  const vagasLista = useMemo(() => (vagasChave ? vagasChave.split(",").map(Number) : []), [vagasChave]);
+  /** As vagas de um pack: o tamanho escolhido, ou o teto. */
+  const vagasDe = useCallback((c: number) => Math.min(teto, vagasLista[c - 1] ?? teto), [teto, vagasLista]);
+
   const enviadosPorCaixa = useMemo(() => {
     const m = new Map<number, number>();
     for (const e of dia?.envios ?? []) {
@@ -140,20 +186,20 @@ export function NewsGenerator() {
 
   /*
    * Toda notícia marcada ganha caixa: a que o operador arrastou, se ainda tiver
-   * vaga, e senão a primeira com vaga, contando o que já foi enviado hoje. Encher
-   * a última caixa abre a próxima sozinho, que é o "marquei oito, virou duas
-   * caixas". Notícia marcada com as caixas todas cheias fica sem caixa, e não
-   * vai no envio.
+   * vaga, e senão a primeira com vaga, contando o que já foi enviado no dia.
+   * Encher a última caixa abre a próxima sozinho, que é o "marquei oito, virou
+   * duas caixas". Notícia marcada com as caixas todas cheias fica sem caixa, e
+   * não vai no envio.
    *
-   * A busca começa no pack da hora, e não no 1: com o dia trocando de pack a
-   * cada duas horas, a vaga que sobrou num pack da manhã (ou que uma retirada
-   * abriu) não passa mais na tela, e a notícia cairia nela sem ninguém notar.
-   * Na madrugada, antes do pack 1, tudo ainda está por vir.
+   * Hoje, a busca começa no pack da hora, e não no 1: a vaga que sobrou num pack
+   * da manhã (ou que uma retirada abriu) não passa mais na tela, e a notícia
+   * cairia nela sem ninguém notar. Na madrugada, antes do pack 1, e nos dias
+   * seguintes, tudo ainda está por vir.
    */
-  const inicio = inicioLocal ?? dia?.inicio ?? INICIO_DIA;
+  const inicio = gradeLocal?.inicio ?? dia?.inicio ?? INICIO_DIA;
   const primeiraAberta =
-    dia && dia.hora >= inicio
-      ? caixaDaHora(cortesLocal ?? dia.cortesGravados ?? dia.cortes, dia.hora, inicio)
+    dia?.hoje && dia.hora >= inicio
+      ? caixaDaHora(gradeLocal?.cortes ?? dia.cortesGravados ?? dia.cortes, dia.hora, inicio)
       : 1;
   const alocacao = useMemo(() => {
     const m = new Map<number, number>();
@@ -162,35 +208,79 @@ export function NewsGenerator() {
     const fila = [...queue].sort((a, b) => a - b);
     for (const i of fila) {
       const c = escolhidas.get(i);
-      if (c !== undefined && ocupadas(c) < vagas) m.set(i, c);
+      if (c !== undefined && ocupadas(c) < vagasDe(c)) m.set(i, c);
     }
     for (const i of fila) {
       if (m.has(i)) continue;
       for (let c = primeiraAberta; c <= MAX_CAIXAS; c++) {
-        if (ocupadas(c) < vagas) {
+        if (ocupadas(c) < vagasDe(c)) {
           m.set(i, c);
           break;
         }
       }
     }
     return m;
-  }, [queue, escolhidas, enviadosPorCaixa, vagas, primeiraAberta]);
+  }, [queue, escolhidas, enviadosPorCaixa, vagasDe, primeiraAberta]);
 
+  const cortesBase = gradeLocal?.cortes ?? dia?.cortesGravados ?? null;
   const caixas = Math.max(
     1,
-    caixasManual,
+    (cortesBase?.length ?? 0) + 1,
     ...enviadosPorCaixa.keys(),
     ...alocacao.values(),
   );
-  const cortes = ajustarCortes(
-    cortesLocal ?? dia?.cortesGravados ?? cortesPadrao(caixas, inicio),
-    caixas,
-    inicio,
-  );
-  const horariosPendentes =
-    (cortesLocal !== null && JSON.stringify(cortes) !== JSON.stringify(dia?.cortes ?? [])) ||
-    (inicioLocal !== null && inicio !== (dia?.inicio ?? INICIO_DIA));
+  const cortes = ajustarCortes(cortesBase ?? cortesPadrao(caixas, inicio), caixas, inicio);
+  const vagasPorPack = Array.from({ length: caixas }, (_, k) => vagasDe(k + 1));
   const semVaga = queue.size - alocacao.size;
+
+  /* ── Grade: edição na hora, gravação sozinha ─────────────────── */
+  const salvarGrade = useCallback(async (data: string, g: GradeEditavel, seq: number) => {
+    setSalvamento({ estado: "salvando" });
+    try {
+      const r = await fetch(`/api/noticias/dia?data=${data}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(g),
+      });
+      const corpo = await r.json();
+      if (!r.ok) throw new Error(corpo?.error ?? `HTTP ${r.status}`);
+      if (data !== dataRef.current) return;
+      gravadaEm.current = String(corpo.atualizadoEm ?? new Date().toISOString());
+      setDia((d) =>
+        d && d.data === data
+          ? {
+              ...d,
+              cortesGravados: g.cortes,
+              inicio: g.inicio,
+              vagasGravadas: g.vagas,
+              gradeAtualizadaEm: gravadaEm.current,
+            }
+          : d,
+      );
+      // Só larga a edição se nada mudou enquanto a gravação ia e voltava.
+      if (seq === edicao.current) setGradeLocal(null);
+      setSalvamento({ estado: "ok", em: Date.now() });
+    } catch (e) {
+      setSalvamento({ estado: "erro", erro: e instanceof Error ? e.message : String(e) });
+    }
+  }, []);
+
+  const mudarGrade = (parcial: Partial<GradeEditavel>) => {
+    const g: GradeEditavel = { cortes, inicio, vagas: vagasPorPack, ...parcial };
+    // O tamanho acompanha o número de packs: pack novo nasce com o teto.
+    g.vagas = Array.from({ length: g.cortes.length + 1 }, (_, k) => Math.min(teto, g.vagas[k] ?? teto));
+    const seq = ++edicao.current;
+    setGradeLocal(g);
+    setSalvamento({ estado: "salvando" });
+    if (timerSalvar.current) clearTimeout(timerSalvar.current);
+    const data = dataSel;
+    timerSalvar.current = setTimeout(() => void salvarGrade(data, g, seq), 500);
+  };
+
+  const tentarSalvarDeNovo = () => {
+    const g = gradeLocal ?? { cortes, inicio, vagas: vagasPorPack };
+    void salvarGrade(dataSel, g, edicao.current);
+  };
 
   const moverParaCaixa = (item: number, caixa: number, trocarCom?: number) => {
     const de = alocacao.get(item);
@@ -200,7 +290,7 @@ export function NewsGenerator() {
     const next = new Map(alocacao);
     const ocupadas =
       (enviadosPorCaixa.get(caixa) ?? 0) + [...alocacao.values()].filter((x) => x === caixa).length;
-    if (ocupadas < vagas) {
+    if (ocupadas < vagasDe(caixa)) {
       next.set(item, caixa);
     } else if (trocarCom !== undefined && trocarCom !== item) {
       // Caixa cheia: soltar em cima de uma notícia troca as duas de lugar.
@@ -210,7 +300,7 @@ export function NewsGenerator() {
       return;
     }
     setEscolhidas(next);
-    if (caixa > caixasManual) setCaixasManual(caixa);
+    if (caixa > caixas) mudarGrade({ cortes: ajustarCortes(cortes, caixa, inicio) });
   };
 
   /** Um pack a cada duas horas, do início ao fim do dia. */
@@ -221,29 +311,19 @@ export function NewsGenerator() {
       toast(`O dia já tem notícia no pack ${comNoticia}, e de 2 em 2 h cabem ${grade.length + 1}.`, "err");
       return;
     }
-    setCaixasManual(grade.length + 1);
-    setCortesLocal(grade);
+    mudarGrade({ cortes: grade });
   };
 
-  const salvarHorarios = async () => {
-    setBusy(true);
-    try {
-      const r = await fetch("/api/noticias/dia", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cortes, inicio }),
-      });
-      const corpo = await r.json();
-      if (!r.ok) throw new Error(corpo?.error ?? `HTTP ${r.status}`);
-      toast("Horários dos packs salvos", "ok");
-      setCortesLocal(null);
-      setInicioLocal(null);
-      await carregarDia();
-    } catch (e) {
-      toast(`Erro ao salvar horários: ${e instanceof Error ? e.message : e}`, "err");
-    } finally {
-      setBusy(false);
+  /** Tamanho de um pack. Não desce abaixo do que já foi enviado para ele. */
+  const mudarVagas = (caixa: number, v: number) => {
+    const ja = enviadosPorCaixa.get(caixa) ?? 0;
+    if (v < ja) {
+      toast(`O pack ${caixa} já tem ${ja} notícia(s) enviada(s) — não dá para ter ${v} vaga(s).`, "err");
+      return;
     }
+    const vs = [...vagasPorPack];
+    vs[caixa - 1] = v;
+    mudarGrade({ vagas: vs });
   };
 
   const retirar = async (id: string, titulo: string) => {
@@ -497,9 +577,11 @@ export function NewsGenerator() {
             body: JSON.stringify({
               titulo: item.title,
               duracao: 10,
+              data: dataSel,
               caixa,
               cortes,
               inicio,
+              vagas: vagasPorPack,
               imagem32: await base64(item, 0),
               imagem25: await base64(item, 1),
             }),
@@ -524,8 +606,6 @@ export function NewsGenerator() {
     if (enviados.length) {
       const feitos = new Set(enviados);
       setQueue((q) => new Set([...q].filter((i) => !feitos.has(i))));
-      setCortesLocal(null);
-      setInicioLocal(null);
       void carregarDia();
     }
     if (falhas.length) {
@@ -930,7 +1010,8 @@ export function NewsGenerator() {
         alocacao={alocacao}
         caixas={caixas}
         maxCaixas={dia?.maxCaixas ?? MAX_CAIXAS}
-        vagas={vagas}
+        vagasPorPack={vagasPorPack}
+        vagasMax={teto}
         cortes={cortes}
         inicio={inicio}
         dia={dia}
@@ -940,18 +1021,22 @@ export function NewsGenerator() {
         enviando={enviando}
         busy={busy}
         selIdx={selIdx}
-        horariosPendentes={horariosPendentes}
+        salvamento={salvamento}
+        onTentarSalvar={tentarSalvarDeNovo}
+        dias={DIAS}
+        dataSel={dataSel}
+        onData={trocarDia}
+        onVagas={mudarVagas}
         onMover={moverParaCaixa}
         onRemover={(i) => toggleQueue(i)}
         onRetirar={(id, titulo) => void retirar(id, titulo)}
         onSelecionar={(i) => setSelIdx(i)}
-        onCortes={setCortesLocal}
-        onInicio={setInicioLocal}
+        onCortes={(c) => mudarGrade({ cortes: c })}
+        onInicio={(h) => mudarGrade({ inicio: h, cortes: ajustarCortes(cortes, caixas, h) })}
         onDuasHoras={deDuasEmDuas}
-        onNovaCaixa={() => setCaixasManual(Math.min(caixas + 1, MAX_CAIXAS))}
-        onRemoverCaixa={(c) => setCaixasManual(Math.max(1, c - 1))}
+        onNovaCaixa={() => mudarGrade({ cortes: ajustarCortes(cortes, Math.min(caixas + 1, MAX_CAIXAS), inicio) })}
+        onRemoverCaixa={(c) => mudarGrade({ cortes: ajustarCortes(cortes, Math.max(1, c - 1), inicio) })}
         onEnviar={() => void enviarParaKuma()}
-        onSalvarHorarios={() => void salvarHorarios()}
         onAtualizar={() => {
           setCarregandoDia(true);
           void carregarDia();
@@ -971,10 +1056,33 @@ export function NewsGenerator() {
   );
 }
 
-/** O dia de hoje como o servidor vê. Falha vira `null`: a tela segue com o que tinha. */
-async function lerDia(): Promise<DiaNoticias | null> {
+type GradeEditavel = { cortes: number[]; inicio: number; vagas: number[] };
+export type Salvamento = { estado: "ok" | "salvando" | "erro"; em?: number; erro?: string };
+
+/** `YYYY-MM-DD` em São Paulo, `deslocamento` dias à frente. */
+function dataSP(deslocamento = 0): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + deslocamento);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
+/** Hoje e os próximos `DIAS_AGENDA` dias, com o rótulo da aba. */
+const DIAS = Array.from({ length: DIAS_AGENDA + 1 }, (_, k) => {
+  const data = dataSP(k);
+  const semana = new Date(`${data}T12:00:00Z`).toLocaleDateString("pt-BR", { weekday: "short", timeZone: "UTC" });
+  const rotulo = k === 0 ? "Hoje" : k === 1 ? "Amanhã" : `${semana.replace(".", "")} ${data.slice(8)}`;
+  return { data, rotulo };
+});
+
+/** Um dia como o servidor vê. Falha vira `null`: a tela segue com o que tinha. */
+async function lerDia(data: string): Promise<DiaNoticias | null> {
   try {
-    const r = await fetch("/api/noticias/dia", { cache: "no-store" });
+    const r = await fetch(`/api/noticias/dia?data=${data}`, { cache: "no-store" });
     const corpo = await r.json();
     if (!r.ok) throw new Error(corpo?.error ?? `HTTP ${r.status}`);
     return corpo as DiaNoticias;

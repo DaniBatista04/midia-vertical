@@ -1,18 +1,21 @@
 import type { NextRequest } from "next/server";
 
-import { dataEmSaoPaulo, FREQUENCIA_PADRAO } from "@/lib/kuma/agendar";
+import { dataEmSaoPaulo } from "@/lib/kuma/agendar";
 import {
   caminhoGrade,
   cortesValidos,
+  DIAS_AGENDA,
   inicioValido,
   MAX_CAIXAS,
-  vagasPorCaixa,
+  vagasDaCaixa,
+  vagasValidas,
   type GradeNoticias,
 } from "@/lib/kuma/noticiaCaixas";
+import { frequenciaDaNoticia } from "@/lib/kuma/noticiaPlano";
 import { nomeMaterialNoticia } from "@/lib/kuma/newsGroup";
 import { caminhoNoticia, idNoticia, type EstadoNoticia } from "@/lib/kuma/noticiaEstado";
 import { enviosDoDia } from "@/lib/kuma/publicarNoticia";
-import { uploadPublico } from "@/lib/server/supabaseUpload";
+import { lerJson, uploadPublico } from "@/lib/server/supabaseUpload";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -54,6 +57,8 @@ type Corpo = {
   cortes?: number[];
   /** Hora em que a caixa 1 entra; antes dela fica a última. Sem ela, `INICIO_DIA`. */
   inicio?: number;
+  /** Tamanho de cada caixa (vagas), na ordem. Sem ele, fica o gravado. */
+  vagas?: number[];
   /**
    * Envio de teste do `ignoreLock`: não entra em pack nem no plano do dia, e
    * depois de aprovado ganha plano e unidade só dele nas telas deste prédio.
@@ -83,6 +88,13 @@ export async function POST(req: NextRequest) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) {
     return Response.json({ error: "Data inválida — use YYYY-MM-DD." }, { status: 400 });
   }
+  // Agendar vai até `DIAS_AGENDA` dias à frente; dia que já passou não recebe notícia.
+  if (data < dataEmSaoPaulo(0) || data > dataEmSaoPaulo(DIAS_AGENDA)) {
+    return Response.json(
+      { error: `Data fora da agenda: ${data} — de hoje até ${dataEmSaoPaulo(DIAS_AGENDA)}.` },
+      { status: 400 },
+    );
+  }
 
   const duracao = Number(corpo.duracao ?? 10);
   if (!Number.isInteger(duracao) || duracao < 10 || duracao % 5 !== 0) {
@@ -106,6 +118,12 @@ export async function POST(req: NextRequest) {
       { error: `Início do pack 1 inválido: ${JSON.stringify(corpo.inicio)}.` },
       { status: 400 },
     );
+  }
+  if (corpo.vagas !== undefined) {
+    const n = Array.isArray(corpo.cortes) ? corpo.cortes.length + 1 : MAX_CAIXAS;
+    if (!vagasValidas(corpo.vagas, n, frequenciaDaNoticia())) {
+      return Response.json({ error: `Tamanho dos packs inválido: ${JSON.stringify(corpo.vagas)}.` }, { status: 400 });
+    }
   }
   if (corpo.cortes !== undefined) {
     const n = Array.isArray(corpo.cortes) ? corpo.cortes.length + 1 : 0;
@@ -167,16 +185,18 @@ export async function POST(req: NextRequest) {
    * notícias no dia vão para outra caixa. Envio parado por erro não ocupa vaga,
    * porque o grupo dele nunca foi amarrado, e o retirado já saiu do plano.
    */
-  const frequencia = Number(process.env.KUMA_CLIMA_FREQUENCIA ?? FREQUENCIA_PADRAO);
-  const vagas = vagasPorCaixa(frequencia);
+  const frequencia = frequenciaDaNoticia();
+  const gradeGravada = await lerJson<GradeNoticias>(caminhoGrade(data));
+  const vagasDaGrade = corpo.vagas ?? gradeGravada?.vagas;
+  const vagas = vagasDaCaixa(vagasDaGrade ? { vagas: vagasDaGrade } : null, caixa, frequencia);
   const naEsteira = envios.filter((e) => !e.erro && !e.retiradaEm && !e.teste);
   const naCaixa = naEsteira.filter((e) => (e.caixa ?? 1) === caixa).length;
   if (!teste && naCaixa >= vagas) {
     return Response.json(
       {
         error:
-          `O pack ${caixa} de ${data} já tem ${naCaixa} notícia(s) — é o máximo que ` +
-          `${frequencia} exibições/dia comporta num pack. Use outro pack.`,
+          `O pack ${caixa} de ${data} já tem ${naCaixa} notícia(s), e ele tem ${vagas} vaga(s). ` +
+          "Use outro pack ou aumente o tamanho dele.",
       },
       { status: 409 },
     );
@@ -207,6 +227,7 @@ export async function POST(req: NextRequest) {
       data,
       cortes: corpo.cortes,
       ...(corpo.inicio !== undefined ? { inicio: corpo.inicio } : {}),
+      ...(vagasDaGrade ? { vagas: vagasDaGrade } : {}),
       atualizadoEm: new Date().toISOString(),
     };
     await uploadPublico({

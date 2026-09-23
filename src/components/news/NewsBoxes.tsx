@@ -12,6 +12,7 @@ import type { DiaNoticias, EnvioDoDia } from "@/app/api/noticias/dia/route";
 import { proxiedImage } from "@/lib/news/draw";
 import type { NewsItem } from "@/lib/news/spec";
 import { caixaDaHora as caixaPedida, FIM_DIA, rotuloHora } from "@/lib/kuma/noticiaCaixas";
+import type { Salvamento } from "@/components/news/NewsGenerator";
 
 /**
  * A programação do dia: a linha do tempo com as janelas e, embaixo, uma caixa
@@ -33,7 +34,6 @@ type Props = {
   alocacao: Map<number, number>;
   caixas: number;
   maxCaixas: number;
-  vagas: number;
   cortes: number[];
   /** Hora em que o pack 1 entra; antes dela fica o último. */
   inicio: number;
@@ -47,7 +47,18 @@ type Props = {
   enviando: { feitas: number; total: number; item: number } | null;
   busy: boolean;
   selIdx: number | null;
-  horariosPendentes: boolean;
+  /** Vagas de cada pack, na ordem (o tamanho escolhido, ou o teto). */
+  vagasPorPack: number[];
+  /** O máximo de vagas que um pack pode ter com a frequência da unidade. */
+  vagasMax: number;
+  /** Como está a gravação sozinha da grade. */
+  salvamento: Salvamento;
+  onTentarSalvar: () => void;
+  /** As abas de dia: hoje e os próximos, para agendar. */
+  dias: { data: string; rotulo: string }[];
+  dataSel: string;
+  onData: (data: string) => void;
+  onVagas: (caixa: number, vagas: number) => void;
   onMover: (item: number, caixa: number, trocarCom?: number) => void;
   onRemover: (item: number) => void;
   /** Tira do pack uma notícia já enviada. */
@@ -59,7 +70,6 @@ type Props = {
   onDuasHoras: () => void;
   onRemoverCaixa: (caixa: number) => void;
   onEnviar: () => void;
-  onSalvarHorarios: () => void;
   onAtualizar: () => void;
 };
 
@@ -161,7 +171,8 @@ export function NewsBoxes(p: Props) {
   const aprovar = enviados.filter((e) => e.etapa === "em-aprovacao").length;
   const aprovadas = enviados.filter((e) => e.etapa === "no-plano").length;
   const pendentes = [...p.alocacao.entries()];
-  const hora = p.dia?.hora ?? null;
+  // Só hoje há "agora": num dia agendado nada está no ar nem encerrado ainda.
+  const hora = p.dia?.hoje ? p.dia.hora : null;
   const caixaDaHora = hora === null ? null : caixaPedida(p.cortes, hora, p.inicio);
   /** Madrugada: o último pack segue no ar, e os outros ainda estão por vir. */
   const antesDoInicio = hora !== null && hora < p.inicio && p.caixas > 1;
@@ -229,12 +240,24 @@ export function NewsBoxes(p: Props) {
         <button className="boxes-toggle" onClick={() => setAberto((a) => !a)} title={aberto ? "Recolher" : "Abrir"}>
           <span className={`chev${aberto ? " on" : ""}`}>▸</span>
           <span className="boxes-title">Programação do dia</span>
-          {p.dia && (
-            <span className="boxes-date">
-              {p.dia.data.split("-").reverse().join("/")}
-            </span>
-          )}
         </button>
+
+        <div className="dias-linha">
+        <div className="dias-tabs" role="tablist">
+          {p.dias.map((d) => (
+            <button
+              key={d.data}
+              role="tab"
+              aria-selected={d.data === p.dataSel}
+              className={`dia-tab${d.data === p.dataSel ? " on" : ""}`}
+              onClick={() => p.onData(d.data)}
+              title={d.data.split("-").reverse().join("/")}
+            >
+              {d.rotulo}
+            </button>
+          ))}
+        </div>
+        </div>
 
         {!p.dia ? (
           <div className="boxes-resumo">
@@ -285,11 +308,16 @@ export function NewsBoxes(p: Props) {
             title="Relê o que já foi enviado hoje">
             {p.carregando ? <span className="spinner" /> : "↻"}
           </button>
-          {p.horariosPendentes && !totalPendentes && (
-            <button className="btn btn-ghost btn-sm" onClick={p.onSalvarHorarios} disabled={p.busy}>
-              Salvar horários
-            </button>
-          )}
+          <span className={`grade-salva ${p.salvamento.estado}`}
+            title={p.salvamento.erro ?? "Horários e tamanhos dos packs são gravados sozinhos a cada mudança"}>
+            {p.salvamento.estado === "salvando" ? (
+              <><span className="spinner mini" /> salvando…</>
+            ) : p.salvamento.estado === "erro" ? (
+              <>⚠ não salvou <button className="link-btn" onClick={p.onTentarSalvar}>tentar de novo</button></>
+            ) : p.salvamento.em ? (
+              <>✓ grade salva</>
+            ) : null}
+          </span>
           <button className="btn btn-accent btn-sm boxes-enviar" onClick={p.onEnviar}
             disabled={!totalPendentes || p.busy}>
             {p.enviando ? (
@@ -430,9 +458,16 @@ export function NewsBoxes(p: Props) {
               const deles = enviados.filter((e) => e.caixa === c);
               const meus = pendentes.filter(([, cx]) => cx === c).map(([i]) => i);
               const ocupadas = deles.length + meus.length;
-              const livres = Math.max(0, p.vagas - ocupadas);
+              const vagas = p.vagasPorPack[k] ?? p.vagasMax;
+              const livres = Math.max(0, vagas - ocupadas);
               const cheia = livres === 0;
-              const repete = ocupadas === 3 && p.vagas === 4;
+              // Quantos lugares a estratégia terá: o menor divisor do teto que
+              // comporta as notícias (a regra da Brato), e daí a fatia de cada uma.
+              const lugares = ocupadas
+                ? Array.from({ length: p.vagasMax }, (_, n) => n + 1).find((n) => n >= ocupadas && p.vagasMax % n === 0) ?? p.vagasMax
+                : 0;
+              const repete = lugares > ocupadas;
+              const fatia = lugares ? Math.round((p.dia?.frequencia ?? 240) / lugares) : 0;
               const estado =
                 noAr === c
                   ? "live"
@@ -556,14 +591,32 @@ export function NewsBoxes(p: Props) {
                   </div>
 
                   <div className="bx-foot">
+                    <select
+                      className="bx-vagas"
+                      value={vagas}
+                      onChange={(e) => p.onVagas(c, Number(e.target.value))}
+                      title="Tamanho do pack — menos vagas, mais exibições para cada notícia"
+                    >
+                      {Array.from({ length: p.vagasMax }, (_, n) => n + 1).map((v) => (
+                        <option key={v} value={v} disabled={v < deles.length}>
+                          {v} vaga{v === 1 ? "" : "s"}
+                        </option>
+                      ))}
+                    </select>
                     <div className="bx-meter">
-                      {Array.from({ length: p.vagas }, (_, s) => (
+                      {Array.from({ length: vagas }, (_, s) => (
                         <i key={s} className={s < ocupadas ? "on" : ""} />
                       ))}
                     </div>
                     <span>
-                      {ocupadas}/{p.vagas}
-                      {repete && <em className="bx-aviso" title="A Brato exige que o número de notícias divida as 4 vagas"> · a 1ª repete</em>}
+                      {ocupadas}/{vagas}
+                      {fatia > 0 && <> · {fatia} exib./dia cada</>}
+                      {repete && (
+                        <em className="bx-aviso"
+                          title={`A Brato exige que o número de notícias divida as ${p.vagasMax} fatias da unidade`}>
+                          {" "}· a 1ª repete
+                        </em>
+                      )}
                     </span>
                   </div>
                 </div>
@@ -590,8 +643,8 @@ export function NewsBoxes(p: Props) {
 
           <p className="boxes-nota">
             Dentro do pack as notícias revezam <b>uma por exibição</b>, 10 s cada. Na hora da troca
-            o sistema passa o próximo pack para o Kuma, que leva à tela na virada da faixa de
-            programação dele.
+            o sistema passa o próximo pack para o Kuma, mas ele <b>só chega às telas depois da
+            publicação no portal</b> (City Lock → Liberar).
             {volta && <> Antes das {rotuloHora(p.inicio)} segue no ar o pack {p.caixas}, o último do dia.</>}
             {retiradas.length > 0 && (
               <span>

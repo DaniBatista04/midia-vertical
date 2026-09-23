@@ -144,12 +144,24 @@ de um pack que já passou.
 
 A unidade continua **uma por dia**. A API não tem estratégia por hora, então
 quem vira a caixa é o cron de minuto: `sincronizarEstrategia` confere qual caixa
-a hora pede e reescreve a estratégia quando ela muda. A troca chega à tela na
-virada da faixa de programação do Kuma, não no minuto da chamada — foi o que o
-rodízio de setembro mostrou. Caixa da hora sem notícia aprovada não deixa a tela
-vazia: fica no ar a anterior mais próxima (ou a primeira seguinte). Os horários
-moram em `noticias/grade/<data>.json`, gravados no envio; plano de antes das
-caixas é um dia de uma caixa só. Ver `noticiaCaixas.ts`.
+a hora pede e reescreve a estratégia quando ela muda. **A troca não chega sozinha
+à tela**: a lista nova só aparece depois do City Lock e da publicação no portal
+(confirmado pela operação em 23/09/2026). Caixa da hora sem notícia aprovada não
+deixa a tela vazia: fica no ar a anterior mais próxima (ou a primeira seguinte).
+Ver `noticiaCaixas.ts`.
+
+A grade do dia — início do pack 1, horários de troca e tamanho de cada pack —
+mora em `noticias/grade/<data>.json` e é **gravada sozinha** a cada mudança no
+painel (`PUT /api/noticias/dia`), então sobrevive a um F5. As abas de dia deixam
+montar e enviar a programação de até seis dias à frente: a notícia de um dia
+agendado passa pela Análise Criativa agora e entra no plano daquele dia. Plano
+de antes das caixas é um dia de uma caixa só.
+
+**Tamanho do pack e frequência.** A unidade de notícia tem **no máximo 240
+exibições/dia, em múltiplos de 60** (`frequenciaDaNoticia`; `KUMA_NOTICIA_FREQUENCIA`
+só pode baixar). Cada pack tem de 1 a 4 vagas: menos vagas, mais exibições para
+cada notícia — quatro notícias ficam com 60 cada, duas com 120, uma com 240.
+Com três, a primeira repete e fica com 120 (a regra do divisor da Brato).
 
 Antes era uma unidade por notícia, e um dia com quatro virava quatro planos na
 lista do portal, cada um travando as mesmas telas a 240 exibições/dia. Agora os

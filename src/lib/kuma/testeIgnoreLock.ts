@@ -46,9 +46,14 @@ import {
   kumaConfig,
   type KumaConfig,
 } from "./client";
-import { dataEmSaoPaulo, FREQUENCIA_PADRAO } from "./agendar";
+import { dataEmSaoPaulo } from "./agendar";
 import { cidadesConfiguradas } from "./cidades";
-import { caminhoPlanoNoticias, gruposParaEstrategia, type PlanoNoticias } from "./noticiaPlano";
+import {
+  caminhoPlanoNoticias,
+  frequenciaDaNoticia,
+  gruposParaEstrategia,
+  type PlanoNoticias,
+} from "./noticiaPlano";
 import { caminhoNoticia, type EstadoNoticia, type TesteIgnoreLock } from "./noticiaEstado";
 import { lerJson, uploadPublico } from "../server/supabaseUpload";
 
@@ -158,7 +163,7 @@ export async function abrirTeste(
   const unidadeRef = unidades.find((u) => String(u.cityId) === cidade) ?? unidades[0] ?? {};
   const duracao = Number(unidadeRef.durationInSecond ?? estado.duracao);
   const frequencia = Number(
-    unidadeRef.frequency ?? process.env.KUMA_CLIMA_FREQUENCIA ?? FREQUENCIA_PADRAO,
+    unidadeRef.frequency ?? frequenciaDaNoticia(),
   );
   teste.cidadeId = cidade;
 
