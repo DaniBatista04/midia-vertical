@@ -109,15 +109,46 @@ export async function abrirTeste(
   }
 
   let campanha: Corpo;
-  let unidadeRef: Corpo;
+  let unidades: Corpo[];
   try {
     campanha = await getCampaign(plano.unidadeId, cfg);
-    unidadeRef = (await getCampaignUnits(plano.unidadeId, cfg))[0] ?? {};
+    unidades = await getCampaignUnits(plano.unidadeId, cfg);
   } catch (e) {
     return falhar("referência", e);
   }
-  const cidade =
-    String(unidadeRef.cityId ?? "") || cidadesConfiguradas(process.env.KUMA_CLIMA_CIDADE)[0];
+
+  /*
+   * A cidade é a do prédio, não a da primeira unidade do plano: o plano de
+   * notícias tem uma unidade por praça, e em 23/09/2026 o primeiro teste pegou
+   * a do Rio e procurou um prédio de São Paulo lá — "nenhuma tela válida".
+   * Tenta cada cidade do plano (e as configuradas) até o prédio aparecer.
+   */
+  const candidatas = [
+    ...new Set([
+      ...unidades.map((u) => String(u.cityId ?? "")).filter(Boolean),
+      ...cidadesConfiguradas(process.env.KUMA_CLIMA_CIDADE),
+    ]),
+  ];
+  let cidade = "";
+  let doPredio: string[] = [];
+  for (const c of candidatas) {
+    try {
+      doPredio = (await getValidLocations(c, [teste.predioId], cfg)).map((l) => l.locationId);
+    } catch (e) {
+      return falhar("telas do prédio", e);
+    }
+    if (doPredio.length) {
+      cidade = c;
+      break;
+    }
+  }
+  if (!cidade) {
+    return falhar(
+      "telas do prédio",
+      `o prédio ${teste.predioId} não tem tela válida em nenhuma das cidades ${candidatas.join(", ")}`,
+    );
+  }
+  const unidadeRef = unidades.find((u) => String(u.cityId) === cidade) ?? unidades[0] ?? {};
   const duracao = Number(unidadeRef.durationInSecond ?? estado.duracao);
   const frequencia = Number(
     unidadeRef.frequency ?? process.env.KUMA_CLIMA_FREQUENCIA ?? FREQUENCIA_PADRAO,
@@ -126,14 +157,6 @@ export async function abrirTeste(
 
   /* ── Telas: conferidas antes de criar qualquer coisa ───────── */
   // Um Point ID que não casa não pode deixar plano vazio para trás no Kuma.
-  let doPredio: string[];
-  try {
-    doPredio = (await getValidLocations(cidade, [teste.predioId], cfg)).map((l) => l.locationId);
-  } catch (e) {
-    return falhar("telas do prédio", e);
-  }
-  if (!doPredio.length) return falhar("telas do prédio", `o prédio ${teste.predioId} não tem tela válida`);
-
   // Point ID escolhido à mão só entra se o Kuma o listar como tela válida do
   // prédio: um id que não casa criaria unidade com tela errada, ou nenhuma.
   let telas = doPredio;
