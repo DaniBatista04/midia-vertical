@@ -1,0 +1,273 @@
+/**
+ * O teste do `ignoreLock`: uma notícia com plano e unidade só dela, criada pelo
+ * módulo novo de unidade (`unit/create`) com `ignoreLock: true`.
+ *
+ * ## A pergunta
+ *
+ * Trocar a estratégia de uma unidade viva não chega à tela sozinho — o conteúdo
+ * só aparece depois do City Lock e da publicação no portal, e isso é o que
+ * impede troca de notícia e de comunicado ao longo do dia. O contrato do
+ * `unit/create` tem um campo `ignoreLock: boolean` sem descrição nenhuma. Este
+ * teste responde se uma unidade criada com ele vai à tela sem o ciclo manual.
+ *
+ * ## Por que um plano novo, e não uma unidade no plano do dia
+ *
+ * A estratégia amarra o criativo no **plano** (`orderId` é o `adCampaignId`,
+ * medido em 09/09/2026 — ver `createOrder` no `client.ts`). Uma unidade de teste
+ * dentro do plano das notícias do dia, com a notícia de teste amarrada, trocaria
+ * as notícias da cidade inteira. Então o teste cria um plano próprio, copiando
+ * do plano do dia a conta, o tipo, a cidade, a duração e a frequência, e muda só
+ * duas coisas: as telas (as de um prédio) e o `ignoreLock`.
+ *
+ * Cada chamada ao Kuma fica no `log` do envio, com o que ele respondeu: o
+ * resultado do teste é esse registro, mais o que alguém vir na tela do prédio.
+ */
+
+import {
+  cancelAdUnit,
+  createAdUnit,
+  createCampaign,
+  createOrderStrategy,
+  getAdUnit,
+  getCampaign,
+  getCampaignUnits,
+  getValidLocations,
+  inquireAdUnit,
+  KUMA_PRODUCT,
+  kumaConfig,
+  type KumaConfig,
+} from "./client";
+import { dataEmSaoPaulo, FREQUENCIA_PADRAO } from "./agendar";
+import { cidadesConfiguradas } from "./cidades";
+import { caminhoPlanoNoticias, gruposParaEstrategia, type PlanoNoticias } from "./noticiaPlano";
+import { caminhoNoticia, type EstadoNoticia, type TesteIgnoreLock } from "./noticiaEstado";
+import { lerJson, uploadPublico } from "../server/supabaseUpload";
+
+type Corpo = Record<string, unknown>;
+
+function cfgDaNoticia(cfg?: KumaConfig): KumaConfig {
+  if (cfg) return cfg;
+  const conta = process.env.KUMA_BIDDER_NEWS?.trim();
+  if (!conta) throw new Error("KUMA_BIDDER_NEWS não configurada — o teste iria para a conta do clima.");
+  return kumaConfig(conta);
+}
+
+async function gravar(estado: EstadoNoticia): Promise<void> {
+  await uploadPublico({
+    caminho: caminhoNoticia(estado.id),
+    conteudo: Buffer.from(JSON.stringify(estado, null, 2)),
+    contentType: "application/json",
+  });
+}
+
+const curto = (v: unknown) => JSON.stringify(v).slice(0, 600);
+const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** O que interessa de `unit/get` para saber se a unidade foi ao ar. */
+export function resumoDaUnidade(u: Corpo): Corpo {
+  const campos = [
+    "adUnitStatus", "adUnitType", "auditStatus", "published", "publishChanged",
+    "publishVersion", "publishTime", "reserved", "broadcast", "targetCount",
+    "startDate", "endDate", "errorTargetIds",
+  ];
+  return Object.fromEntries(campos.filter((c) => c in u).map((c) => [c, u[c]]));
+}
+
+/**
+ * Abre o plano e a unidade do teste e amarra a notícia. Cada passo é gravado ao
+ * terminar, com o id que criou: uma volta que morra no meio retoma do passo
+ * seguinte na próxima, sem criar plano ou unidade em dobro.
+ */
+export async function abrirTeste(
+  estado: EstadoNoticia & { teste: TesteIgnoreLock; grupoId: string },
+  opts: { cfg?: KumaConfig; log?: (m: string) => void } = {},
+): Promise<{ ok: true; planoId: string; telas: number } | { ok: false; motivo: string }> {
+  const log = opts.log ?? (() => {});
+  const cfg = cfgDaNoticia(opts.cfg);
+  const teste: TesteIgnoreLock = { ...estado.teste, log: [...(estado.teste.log ?? [])] };
+  const atual = (): EstadoNoticia => ({ ...estado, teste });
+  const anotar = async (passo: string, ok: boolean, detalhe: string) => {
+    teste.log.push({ em: new Date().toISOString(), passo, ok, detalhe });
+    log(`${estado.id} [teste] ${passo}: ${detalhe}`);
+    await gravar(atual());
+  };
+  const falhar = async (passo: string, e: unknown) => {
+    const motivo = `teste ignoreLock — ${passo}: ${msg(e)}`;
+    teste.log.push({ em: new Date().toISOString(), passo, ok: false, detalhe: msg(e) });
+    await gravar({ ...atual(), erro: motivo, criandoEm: undefined });
+    return { ok: false as const, motivo };
+  };
+
+  const hoje = dataEmSaoPaulo(0);
+
+  /* ── Referência: o plano de notícias do dia ─────────────────── */
+  const plano =
+    (await lerJson<PlanoNoticias>(caminhoPlanoNoticias(hoje))) ??
+    (await lerJson<PlanoNoticias>(caminhoPlanoNoticias(estado.data)));
+  if (!plano?.unidadeId) {
+    return falhar("referência", "o dia não tem plano de notícia para copiar conta, cidade e frequência");
+  }
+
+  let campanha: Corpo;
+  let unidadeRef: Corpo;
+  try {
+    campanha = await getCampaign(plano.unidadeId, cfg);
+    unidadeRef = (await getCampaignUnits(plano.unidadeId, cfg))[0] ?? {};
+  } catch (e) {
+    return falhar("referência", e);
+  }
+  const cidade =
+    String(unidadeRef.cityId ?? "") || cidadesConfiguradas(process.env.KUMA_CLIMA_CIDADE)[0];
+  const duracao = Number(unidadeRef.durationInSecond ?? estado.duracao);
+  const frequencia = Number(
+    unidadeRef.frequency ?? process.env.KUMA_CLIMA_FREQUENCIA ?? FREQUENCIA_PADRAO,
+  );
+  teste.cidadeId = cidade;
+
+  /* ── 1. Plano próprio ───────────────────────────────────────── */
+  if (!teste.planoId) {
+    const pedido = {
+      accountId: campanha.accountId,
+      adCampaignName: `TESTE ignoreLock ${hoje} ${teste.predioNome}`.slice(0, 80),
+      adCampaignType: campanha.adCampaignType ?? "VACANT",
+      productName: KUMA_PRODUCT,
+      referId: campanha.referId,
+      note: `Teste do ignoreLock pelo painel midia-vertical — envio ${estado.id}`,
+    };
+    try {
+      const r = await createCampaign(pedido, cfg);
+      const id = r.adCampaignId ? String(r.adCampaignId) : "";
+      if (!id) return falhar("campaign/create", `sem adCampaignId na resposta: ${curto(r)}`);
+      teste.planoId = id;
+      await anotar("campaign/create", true, `plano ${id} · pedido ${curto(pedido)}`);
+    } catch (e) {
+      return falhar("campaign/create", e);
+    }
+  }
+
+  /* ── 2. Unidade com ignoreLock ──────────────────────────────── */
+  if (!teste.adUnitId) {
+    let telas: string[];
+    try {
+      telas = (await getValidLocations(cidade, [teste.predioId], cfg)).map((l) => l.locationId);
+    } catch (e) {
+      return falhar("telas do prédio", e);
+    }
+    if (!telas.length) return falhar("telas do prédio", `o prédio ${teste.predioId} não tem tela válida`);
+
+    const pedido = {
+      adCampaignId: teste.planoId,
+      adSlotName: unidadeRef.adSlotName ?? "SMART_SCREEN_FULL",
+      cityId: cidade,
+      adUnitTargetIds: telas,
+      targetType: "LOCATION",
+      goalLocationNum: telas.length,
+      startDate: hoje,
+      endDate: hoje,
+      durationInSecond: duracao,
+      frequency: frequencia,
+      adUnitType: "GUARANTEED",
+      dsp: false,
+      ignoreLock: true,
+      remark: `teste ignoreLock ${estado.id}`,
+    };
+    try {
+      const r = await createAdUnit(pedido, cfg);
+      const id = r.adUnitId ? String(r.adUnitId) : "";
+      if (!id) return falhar("unit/create", `sem adUnitId na resposta: ${curto(r)}`);
+      teste.adUnitId = id;
+      teste.telas = telas.length;
+      await anotar("unit/create", true, `unidade ${id} · ${telas.length} tela(s) · resposta ${curto(r)}`);
+    } catch (e) {
+      return falhar("unit/create", e);
+    }
+  }
+
+  /* ── 3. Amarrar a notícia ───────────────────────────────────── */
+  try {
+    const lista = gruposParaEstrategia([estado.grupoId], frequencia);
+    await createOrderStrategy(teste.planoId!, lista, cfg);
+    await anotar("createOrderStrategy", true, `plano ${teste.planoId} ← ${lista.join(", ")}`);
+  } catch (e) {
+    return falhar("createOrderStrategy", e);
+  }
+
+  /* ── 4. Como a unidade ficou ────────────────────────────────── */
+  try {
+    const u = await getAdUnit(teste.adUnitId!, cfg);
+    await anotar("unit/get", true, curto(resumoDaUnidade(u)));
+  } catch (e) {
+    await anotar("unit/get", false, msg(e));
+  }
+
+  await gravar({
+    ...atual(),
+    unidadeId: teste.planoId,
+    agendadoEm: new Date().toISOString(),
+    telas: teste.telas,
+    criandoEm: undefined,
+  });
+  return { ok: true, planoId: teste.planoId!, telas: teste.telas ?? 0 };
+}
+
+/** Lê de novo a unidade do teste: `unit/get` e `unit/inquire`, anotados no log. */
+export async function lerTeste(id: string, opts: { cfg?: KumaConfig } = {}): Promise<EstadoNoticia> {
+  const estado = await lerJson<EstadoNoticia>(caminhoNoticia(id));
+  if (!estado?.teste) throw new Error(`envio ${id} não é um teste`);
+  if (!estado.teste.adUnitId) return estado;
+  const cfg = cfgDaNoticia(opts.cfg);
+  const teste = { ...estado.teste, log: [...estado.teste.log] };
+  const agora = () => new Date().toISOString();
+  try {
+    const u = await getAdUnit(teste.adUnitId!, cfg);
+    teste.log.push({ em: agora(), passo: "unit/get", ok: true, detalhe: curto(resumoDaUnidade(u)) });
+  } catch (e) {
+    teste.log.push({ em: agora(), passo: "unit/get", ok: false, detalhe: msg(e) });
+  }
+  try {
+    const t = await inquireAdUnit(teste.adUnitId!, cfg);
+    teste.log.push({ em: agora(), passo: "unit/inquire", ok: true, detalhe: curto(t) });
+  } catch (e) {
+    teste.log.push({ em: agora(), passo: "unit/inquire", ok: false, detalhe: msg(e) });
+  }
+  const novo = { ...estado, teste };
+  await gravar(novo);
+  return novo;
+}
+
+/**
+ * Tira o erro de um teste parado, para o cron tentar de novo na volta seguinte.
+ * Retoma do passo que faltou: o plano e a unidade já criados ficam no registro.
+ */
+export async function retomarTeste(id: string): Promise<EstadoNoticia> {
+  const estado = await lerJson<EstadoNoticia>(caminhoNoticia(id));
+  if (!estado?.teste) throw new Error(`envio ${id} não é um teste`);
+  const novo = { ...estado, erro: undefined, criandoEm: undefined };
+  await gravar(novo);
+  return novo;
+}
+
+/** Cancela a unidade do teste. O plano fica, vazio, como os de clima cancelados. */
+export async function cancelarTeste(id: string, opts: { cfg?: KumaConfig } = {}): Promise<EstadoNoticia> {
+  const estado = await lerJson<EstadoNoticia>(caminhoNoticia(id));
+  if (!estado?.teste) throw new Error(`envio ${id} não é um teste`);
+  const teste = { ...estado.teste, log: [...estado.teste.log] };
+  const em = new Date().toISOString();
+  if (!teste.adUnitId) {
+    // Ainda não tem unidade: basta o cron parar de levar o envio adiante.
+    teste.canceladoEm = em;
+    const novo = { ...estado, teste, retiradaEm: em };
+    await gravar(novo);
+    return novo;
+  }
+  try {
+    const r = await cancelAdUnit(teste.adUnitId, cfgDaNoticia(opts.cfg));
+    teste.canceladoEm = em;
+    teste.log.push({ em, passo: "unit/cancel", ok: true, detalhe: curto(r) });
+  } catch (e) {
+    teste.log.push({ em, passo: "unit/cancel", ok: false, detalhe: msg(e) });
+  }
+  const novo = { ...estado, teste };
+  await gravar(novo);
+  return novo;
+}

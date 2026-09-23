@@ -563,3 +563,52 @@ export async function renomearPlano(
 export async function cancelOrder(orderId: string, cfg: KumaConfig = kumaConfig()): Promise<void> {
   await call(cfg, "POST", "/v1/adgroup/cancelOrder", { bidderId: cfg.bidderId, orderId });
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Plano e unidade pelo módulo novo — só para o teste do `ignoreLock`
+   ══════════════════════════════════════════════════════════════════════════
+
+   Nenhuma dessas rotas está nos PDFs; o contrato é o do `/v2/api-docs`
+   (`docs/api-kuma/openapi-brato-v2.json`). Elas devolvem o corpo cru, porque o
+   que se quer do teste é justamente ver o que o Kuma responde. Criação nunca é
+   repetida (ver `call`). */
+
+type Corpo = Record<string, unknown>;
+const dadosDe = (body: Corpo): Corpo => ((body.data ?? body) as Corpo) ?? {};
+
+/** `campaign/get` — conta, tipo e número de reporte de um plano existente. */
+export async function getCampaign(adCampaignId: string, cfg: KumaConfig = kumaConfig()): Promise<Corpo> {
+  return dadosDe(await call<Corpo>(cfg, "GET", `/v1/adgroup/campaign/get/${encodeURIComponent(adCampaignId)}`));
+}
+
+/** `unit/getAll` — as unidades de um plano. */
+export async function getCampaignUnits(adCampaignId: string, cfg: KumaConfig = kumaConfig()): Promise<Corpo[]> {
+  const d = dadosDe(await call<Corpo>(cfg, "GET", `/v1/adgroup/unit/getAll/${encodeURIComponent(adCampaignId)}`));
+  const lista = (d.result ?? d.list ?? d) as unknown;
+  return Array.isArray(lista) ? (lista as Corpo[]) : [];
+}
+
+/** `campaign/create`. Devolve o corpo cru; o id vem em `adCampaignId`. */
+export async function createCampaign(req: Corpo, cfg: KumaConfig = kumaConfig()): Promise<Corpo> {
+  return dadosDe(await call<Corpo>(cfg, "POST", "/v1/adgroup/campaign/create", req, 1));
+}
+
+/** `unit/create`. Devolve o corpo cru; o id vem em `adUnitId`. */
+export async function createAdUnit(req: Corpo, cfg: KumaConfig = kumaConfig()): Promise<Corpo> {
+  return dadosDe(await call<Corpo>(cfg, "POST", "/v1/adgroup/unit/create", req, 1));
+}
+
+/** `unit/get` — inclui `published`, `publishChanged`, `publishVersion`, `publishTime`. */
+export async function getAdUnit(adUnitId: string, cfg: KumaConfig = kumaConfig()): Promise<Corpo> {
+  return dadosDe(await call<Corpo>(cfg, "GET", `/v1/adgroup/unit/get/${encodeURIComponent(adUnitId)}`));
+}
+
+/** `unit/inquire` — como está a trava de pontos da unidade. */
+export async function inquireAdUnit(adUnitId: string, cfg: KumaConfig = kumaConfig()): Promise<Corpo> {
+  return dadosDe(await call<Corpo>(cfg, "GET", `/v1/adgroup/unit/inquire/${encodeURIComponent(adUnitId)}`));
+}
+
+/** `unit/cancel`. */
+export async function cancelAdUnit(adUnitId: string, cfg: KumaConfig = kumaConfig()): Promise<Corpo> {
+  return dadosDe(await call<Corpo>(cfg, "POST", `/v1/adgroup/unit/cancel/${encodeURIComponent(adUnitId)}`, {}, 1));
+}

@@ -6,6 +6,7 @@ import { AppShell, type ShellStatus } from "@/components/AppShell";
 import { useToast } from "@/components/useToast";
 import type { DiaNoticias } from "@/app/api/noticias/dia/route";
 import { NewsBoxes } from "@/components/news/NewsBoxes";
+import { NewsTeste } from "@/components/news/NewsTeste";
 import { kumaFilename } from "@/lib/kuma/filename";
 import {
   ajustarCortes,
@@ -425,24 +426,59 @@ export function NewsGenerator() {
    * A rota só hospeda e registra. Submeter vem depois, pelo cron, por causa da
    * folga de propagação de dez minutos — ninguém fica de tela aberta esperando.
    */
+  /** O JPG de um formato, em base64 sem prefixo, como a rota de envio pede. */
+  const jpegBase64 = async (item: NewsItem, fmtIndex: number) => {
+    const blob = await renderJpeg(item, NEWS_FORMATS[fmtIndex], fmtIndex, controls);
+    const buf = await blob.arrayBuffer();
+    let bin = "";
+    const bytes = new Uint8Array(buf);
+    // Em pedaços: `String.fromCharCode(...bytes)` de uma vez estoura a pilha
+    // com arquivo grande.
+    for (let i = 0; i < bytes.length; i += 8192) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    }
+    return btoa(bin);
+  };
+
+  /** Pack de teste do `ignoreLock`: a notícia selecionada, num prédio só. */
+  const enviarTeste = async (predio: { buildingId: string; buildingName: string }) => {
+    if (!selected) return toast("Selecione uma notícia no feed.", "err");
+    const ok = window.confirm(
+      `Enviar “${selected.title.slice(0, 80)}” como teste do ignoreLock no prédio ${predio.buildingName}?\n\n` +
+        "Depois de aprovada no portal, ela ganha um plano e uma unidade só dela, nas telas desse prédio, hoje.",
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/noticias/publicar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          titulo: selected.title,
+          duracao: 10,
+          teste: { predioId: predio.buildingId, predioNome: predio.buildingName },
+          imagem32: await jpegBase64(selected, 0),
+          imagem25: await jpegBase64(selected, 1),
+        }),
+      });
+      const corpo = (await r.json()) as { error?: string; id?: string };
+      if (!r.ok) throw new Error(corpo.error ?? `HTTP ${r.status}`);
+      toast(`🧪 Teste ${corpo.id} enviado — aparece na Análise Criativa em ~10 min`, "ok");
+      await carregarDia();
+    } catch (e) {
+      toast(`Erro no teste: ${e instanceof Error ? e.message : e}`, "err");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const enviarParaKuma = async () => {
     // Caixa por caixa, na ordem: se o lote parar no meio, o que subiu é o
     // começo do dia, e não um pedaço de cada janela.
     const fila = [...alocacao.entries()].sort((a, b) => a[1] - b[1] || a[0] - b[0]);
     if (!fila.length) return toast("Marque ao menos uma notícia na fila.", "err");
 
-    const base64 = async (item: NewsItem, fmtIndex: number) => {
-      const blob = await renderJpeg(item, NEWS_FORMATS[fmtIndex], fmtIndex, controls);
-      const buf = await blob.arrayBuffer();
-      let bin = "";
-      const bytes = new Uint8Array(buf);
-      // Em pedaços: `String.fromCharCode(...bytes)` de uma vez estoura a pilha
-      // com arquivo grande.
-      for (let i = 0; i < bytes.length; i += 8192) {
-        bin += String.fromCharCode(...bytes.subarray(i, i + 8192));
-      }
-      return btoa(bin);
-    };
+    const base64 = jpegBase64;
 
     setBusy(true);
     const enviados: number[] = [];
@@ -918,6 +954,14 @@ export function NewsGenerator() {
           setCarregandoDia(true);
           void carregarDia();
         }}
+      />
+
+      <NewsTeste
+        testes={dia?.testes ?? []}
+        selecionada={selected?.title ?? null}
+        busy={busy}
+        onEnviar={enviarTeste}
+        onAtualizar={() => void carregarDia()}
       />
 
       {toastNode}

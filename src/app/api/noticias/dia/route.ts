@@ -14,6 +14,7 @@ import {
   type GradeNoticias,
 } from "@/lib/kuma/noticiaCaixas";
 import { caminhoPlanoNoticias, type PlanoNoticias } from "@/lib/kuma/noticiaPlano";
+import type { TesteIgnoreLock } from "@/lib/kuma/noticiaEstado";
 import { enviosDoDia, GRACA_SEGUNDOS } from "@/lib/kuma/publicarNoticia";
 import { lerJson, uploadPublico } from "@/lib/server/supabaseUpload";
 
@@ -64,6 +65,24 @@ export type DiaNoticias = {
   caixaNoAr: number | null;
   unidadeId: string | null;
   envios: EnvioDoDia[];
+  /** Envios de teste do `ignoreLock` — fora dos packs (ver `testeIgnoreLock.ts`). */
+  testes: TesteDoDia[];
+};
+
+export type TesteDoDia = {
+  id: string;
+  titulo: string;
+  etapa: EtapaEnvio | "cancelado";
+  predioNome: string;
+  planoId?: string;
+  adUnitId?: string;
+  telas?: number;
+  erro?: string;
+  submeteEm?: string;
+  agendadoEm?: string;
+  canceladoEm?: string;
+  miniatura?: string;
+  log: TesteIgnoreLock["log"];
 };
 
 function dataPedida(req: NextRequest): string | null {
@@ -86,7 +105,7 @@ export async function GET(req: NextRequest) {
     const hora = horaEmSaoPaulo();
     const noAr = new Set(plano?.estrategia ?? []);
     const agora = plano?.grupos.length ? estrategiaDaHora(plano, grade, hora) : null;
-    const caixas = Math.max(1, ...envios.filter((e) => !e.erro && !e.retiradaEm).map((e) => e.caixa ?? 1));
+    const caixas = Math.max(1, ...envios.filter((e) => !e.erro && !e.retiradaEm && !e.teste).map((e) => e.caixa ?? 1));
 
     const corpo: DiaNoticias = {
       data,
@@ -98,7 +117,26 @@ export async function GET(req: NextRequest) {
       inicio: inicioDoDia(grade),
       caixaNoAr: agora?.caixa ?? null,
       unidadeId: plano?.unidadeId ?? null,
-      envios: envios.map((e) => ({
+      testes: envios.filter((e) => e.teste).map((e) => ({
+        id: e.id,
+        titulo: e.titulo,
+        etapa: e.teste!.canceladoEm
+          ? "cancelado"
+          : e.erro ? "parado" : e.unidadeId ? "no-plano" : e.grupoId ? "em-aprovacao" : "propagando",
+        predioNome: e.teste!.predioNome,
+        planoId: e.teste!.planoId,
+        adUnitId: e.teste!.adUnitId,
+        telas: e.teste!.telas,
+        erro: e.erro,
+        submeteEm: !e.grupoId
+          ? new Date(Date.parse(e.hospedadoEm) + GRACA_SEGUNDOS * 1_000).toISOString()
+          : undefined,
+        agendadoEm: e.agendadoEm,
+        canceladoEm: e.teste!.canceladoEm,
+        miniatura: e.materiais[0],
+        log: e.teste!.log ?? [],
+      })),
+      envios: envios.filter((e) => !e.teste).map((e) => ({
         id: e.id,
         titulo: e.titulo,
         caixa: e.caixa ?? 1,
@@ -143,7 +181,7 @@ export async function PUT(req: NextRequest) {
    * mostrando horários que não são os do ar.
    */
   const { envios } = await enviosDoDia(data);
-  const caixas = Math.max(1, ...envios.filter((e) => !e.erro && !e.retiradaEm).map((e) => e.caixa ?? 1));
+  const caixas = Math.max(1, ...envios.filter((e) => !e.erro && !e.retiradaEm && !e.teste).map((e) => e.caixa ?? 1));
   if (n < caixas) {
     return Response.json(
       { error: `O dia tem ${caixas} pack(s) com notícia, e os horários descrevem ${n}.` },

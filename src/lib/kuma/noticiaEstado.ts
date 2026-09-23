@@ -63,6 +63,30 @@ export type EstadoNoticia = {
    * leva ao ar. Libera a vaga do pack para outra notícia.
    */
   retiradaEm?: string;
+
+  /**
+   * Envio de teste do `ignoreLock` (ver `testeIgnoreLock.ts`). Não entra no plano
+   * do dia nem ocupa vaga de pack: depois de aprovado, ganha um plano e uma
+   * unidade só dele, nas telas de um prédio. `unidadeId` do envio guarda o id
+   * desse plano, que é o que a estratégia usa.
+   */
+  teste?: TesteIgnoreLock;
+};
+
+export type PassoDoTeste = { em: string; passo: string; ok: boolean; detalhe: string };
+
+export type TesteIgnoreLock = {
+  predioId: string;
+  predioNome: string;
+  cidadeId?: string;
+  /** Plano criado para o teste — também é o `orderId` da estratégia. */
+  planoId?: string;
+  /** Unidade criada com `ignoreLock: true` dentro do plano. */
+  adUnitId?: string;
+  telas?: number;
+  canceladoEm?: string;
+  /** Cada chamada ao Kuma, com o que ele respondeu. */
+  log: PassoDoTeste[];
 };
 
 export const PREFIXO_NOTICIAS = "noticias/estado";

@@ -57,6 +57,7 @@ import {
 } from "./noticiaCaixas";
 import { caminhoNoticia, idNoticia, type EstadoNoticia } from "./noticiaEstado";
 import { LEASE_SEGUNDOS } from "./estado";
+import { abrirTeste } from "./testeIgnoreLock";
 import { apagar, lerJson, uploadPublico } from "../server/supabaseUpload";
 
 /**
@@ -582,6 +583,16 @@ export async function avancarNoticia(
   const emCurso = estado.criandoEm ? Date.parse(estado.criandoEm) : 0;
   if (emCurso && Date.now() - emCurso < LEASE_SEGUNDOS * 1_000) {
     return { estado: "aguardando-aprovacao", id, grupoId: estado.grupoId, auditoria: "criação em andamento" };
+  }
+
+  // Envio de teste do `ignoreLock`: plano e unidade só dele, longe do plano do
+  // dia (ver `testeIgnoreLock.ts`).
+  if (estado.teste) {
+    const comTrava = { ...estado, criandoEm: new Date().toISOString() };
+    await gravar(comTrava);
+    const r = await abrirTeste({ ...comTrava, teste: estado.teste, grupoId: estado.grupoId }, { cfg, log });
+    if (!r.ok) return { estado: "parado", id, motivo: r.motivo };
+    return { estado: "no-ar", id, unidadeId: r.planoId, telas: r.telas };
   }
 
   /*

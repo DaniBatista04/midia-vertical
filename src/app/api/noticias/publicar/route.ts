@@ -54,6 +54,11 @@ type Corpo = {
   cortes?: number[];
   /** Hora em que a caixa 1 entra; antes dela fica a última. Sem ela, `INICIO_DIA`. */
   inicio?: number;
+  /**
+   * Envio de teste do `ignoreLock`: não entra em pack nem no plano do dia, e
+   * depois de aprovado ganha plano e unidade só dele nas telas deste prédio.
+   */
+  teste?: { predioId?: string; predioNome?: string };
   /** JPG 1080×1920, em base64 sem prefixo. */
   imagem32?: string;
   /** JPG 1080×2560, em base64 sem prefixo. */
@@ -112,6 +117,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  const teste = corpo.teste
+    ? { predioId: String(corpo.teste.predioId ?? "").trim(), predioNome: String(corpo.teste.predioNome ?? "").trim() }
+    : null;
+  if (teste && !/^\d+$/.test(teste.predioId)) {
+    return Response.json({ error: "Teste sem prédio — escolha o prédio onde a notícia vai tocar." }, { status: 400 });
+  }
+
   const imagens = [corpo.imagem32, corpo.imagem25];
   if (imagens.some((i) => !i)) {
     return Response.json({ error: "Faltam as imagens dos dois formatos." }, { status: 400 });
@@ -147,9 +159,9 @@ export async function POST(req: NextRequest) {
    */
   const frequencia = Number(process.env.KUMA_CLIMA_FREQUENCIA ?? FREQUENCIA_PADRAO);
   const vagas = vagasPorCaixa(frequencia);
-  const naEsteira = envios.filter((e) => !e.erro && !e.retiradaEm);
+  const naEsteira = envios.filter((e) => !e.erro && !e.retiradaEm && !e.teste);
   const naCaixa = naEsteira.filter((e) => (e.caixa ?? 1) === caixa).length;
-  if (naCaixa >= vagas) {
+  if (!teste && naCaixa >= vagas) {
     return Response.json(
       {
         error:
@@ -180,7 +192,7 @@ export async function POST(req: NextRequest) {
   // A grade é do dia, não do envio: cada envio do lote traz a mesma, e a última
   // gravada vale. Grava antes do upload para que um lote interrompido no meio
   // não deixe as caixas já enviadas com o horário antigo.
-  if (corpo.cortes) {
+  if (corpo.cortes && !teste) {
     const grade: GradeNoticias = {
       data,
       cortes: corpo.cortes,
@@ -215,7 +227,7 @@ export async function POST(req: NextRequest) {
     data,
     indice,
     duracao,
-    caixa,
+    ...(teste ? { teste: { ...teste, log: [] } } : { caixa }),
     hospedadoEm: new Date().toISOString(),
     materiais,
   };
