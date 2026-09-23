@@ -49,6 +49,10 @@ export function NewsGenerator() {
   /* Programação do dia: o que já foi enviado hoje e onde cai o que está na fila. */
   const [dia, setDia] = useState<DiaNoticias | null>(null);
   const [carregandoDia, setCarregandoDia] = useState(false);
+  const [diaLidoEm, setDiaLidoEm] = useState<number | null>(null);
+  const [falhaDia, setFalhaDia] = useState(false);
+  /** Envio em andamento: quantas foram, de quantas, e qual notícia do feed está subindo agora. */
+  const [enviando, setEnviando] = useState<{ feitas: number; total: number; item: number } | null>(null);
   /** Caixa escolhida à mão (arrastando) para uma notícia da fila. */
   const [escolhidas, setEscolhidas] = useState<Map<number, number>>(new Map());
   const [caixasManual, setCaixasManual] = useState(1);
@@ -84,25 +88,45 @@ export function NewsGenerator() {
   }, []);
 
   /* ── Programação do dia ──────────────────────────────────── */
-  const carregarDia = useCallback(async () => {
-    const d = await lerDia();
-    if (d) setDia(d);
-    setCarregandoDia(false);
+  const aplicarDia = useCallback((d: DiaNoticias | null) => {
+    if (d) {
+      setDia(d);
+      setDiaLidoEm(Date.now());
+    }
+    setFalhaDia(!d);
   }, []);
 
+  const carregarDia = useCallback(async () => {
+    aplicarDia(await lerDia());
+    setCarregandoDia(false);
+  }, [aplicarDia]);
+
+  /*
+   * Releitura sozinha: a cada 15 s enquanto alguma notícia está subindo ou
+   * esperando aprovação — é quando quem opera está olhando o status mudar —, e a
+   * cada minuto quando está tudo parado.
+   */
+  const emAndamento = (dia?.envios ?? []).some(
+    (e) => e.etapa === "propagando" || e.etapa === "em-aprovacao",
+  );
   useEffect(() => {
     let alive = true;
+    let t: ReturnType<typeof setTimeout>;
     const tick = async () => {
       const d = await lerDia();
-      if (alive && d) setDia(d);
+      if (!alive) return;
+      aplicarDia(d);
+      t = setTimeout(() => void tick(), emAndamento ? 15_000 : 60_000);
     };
-    void tick();
-    const t = setInterval(() => void tick(), 60_000);
+    t = setTimeout(() => void tick(), dia ? (emAndamento ? 15_000 : 60_000) : 0);
     return () => {
       alive = false;
-      clearInterval(t);
+      clearTimeout(t);
     };
-  }, []);
+    // `dia` fica de fora de propósito: a releitura não reinicia a cada resposta,
+    // só quando o ritmo muda.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emAndamento, aplicarDia]);
 
   const vagas = dia?.vagas ?? 4;
   const enviadosPorCaixa = useMemo(() => {
@@ -427,6 +451,7 @@ export function NewsGenerator() {
       for (const [n, [i, caixa]] of fila.entries()) {
         const item = items[i];
         setStatus({ text: `Enviando ${n + 1}/${fila.length} · pack ${caixa}…` });
+        setEnviando({ feitas: n, total: fila.length, item: i });
         try {
           const r = await fetch("/api/noticias/publicar", {
             method: "POST",
@@ -455,6 +480,7 @@ export function NewsGenerator() {
       }
     } finally {
       setBusy(false);
+      setEnviando(null);
     }
 
     if (enviados.length) {
@@ -562,7 +588,17 @@ export function NewsGenerator() {
       </div>
 
       <div className="feed-list">
-        {items.length === 0 ? (
+        {loadingFeed && items.length === 0 ? (
+          Array.from({ length: 7 }, (_, k) => (
+            <div key={k} className="feed-item feed-skel" aria-hidden>
+              <div className="fthumb skel" />
+              <div className="finfo">
+                <div className="skel skel-line" />
+                <div className="skel skel-line curta" />
+              </div>
+            </div>
+          ))
+        ) : items.length === 0 ? (
           <div className="feed-empty">
             <div style={{ fontSize: 30, opacity: 0.3 }}>📡</div>
             <p>Nenhum feed carregado</p>
@@ -629,7 +665,11 @@ export function NewsGenerator() {
         <div className="publicar-bloco">
           <button className="btn btn-accent" onClick={() => void enviarParaKuma()}
             disabled={!alocacao.size || busy}>
-            🚀 Enviar fila para o Kuma{alocacao.size > 1 ? ` (${alocacao.size})` : ""}
+            {enviando ? (
+              <><span className="spinner" /> Enviando {enviando.feitas + 1} de {enviando.total}…</>
+            ) : (
+              <>🚀 Enviar fila para o Kuma{alocacao.size > 1 ? ` (${alocacao.size})` : ""}</>
+            )}
           </button>
           <span className="publicar-nota">
             {alocacao.size
@@ -857,6 +897,9 @@ export function NewsGenerator() {
         inicio={inicio}
         dia={dia}
         carregando={carregandoDia}
+        lidoEm={diaLidoEm}
+        falhaLeitura={falhaDia}
+        enviando={enviando}
         busy={busy}
         selIdx={selIdx}
         horariosPendentes={horariosPendentes}

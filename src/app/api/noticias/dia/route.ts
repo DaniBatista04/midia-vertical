@@ -14,7 +14,7 @@ import {
   type GradeNoticias,
 } from "@/lib/kuma/noticiaCaixas";
 import { caminhoPlanoNoticias, type PlanoNoticias } from "@/lib/kuma/noticiaPlano";
-import { enviosDoDia } from "@/lib/kuma/publicarNoticia";
+import { enviosDoDia, GRACA_SEGUNDOS } from "@/lib/kuma/publicarNoticia";
 import { lerJson, uploadPublico } from "@/lib/server/supabaseUpload";
 
 export const runtime = "nodejs";
@@ -40,6 +40,13 @@ export type EnvioDoDia = {
   noAr: boolean;
   miniatura?: string;
   erro?: string;
+  /**
+   * Enquanto sobe: quando o grupo criativo deve ir para a Análise Criativa,
+   * passada a folga de propagação. É o "falta quanto?" do painel.
+   */
+  submeteEm?: string;
+  /** Quando a notícia entrou na etapa em que está. */
+  desde?: string;
 };
 
 export type DiaNoticias = {
@@ -99,6 +106,10 @@ export async function GET(req: NextRequest) {
         noAr: Boolean(e.grupoId && noAr.has(e.grupoId)),
         miniatura: e.materiais[0],
         ...(e.erro ? { erro: e.erro } : {}),
+        ...(!e.grupoId && !e.erro && !e.retiradaEm
+          ? { submeteEm: new Date(Date.parse(e.hospedadoEm) + GRACA_SEGUNDOS * 1_000).toISOString() }
+          : {}),
+        desde: e.retiradaEm ?? e.agendadoEm ?? e.submetidoEm ?? e.hospedadoEm,
       })),
     };
     return Response.json(corpo);

@@ -1,6 +1,12 @@
 "use client";
 
-import { useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import type { DiaNoticias, EnvioDoDia } from "@/app/api/noticias/dia/route";
 import { proxiedImage } from "@/lib/news/draw";
@@ -33,6 +39,12 @@ type Props = {
   inicio: number;
   dia: DiaNoticias | null;
   carregando: boolean;
+  /** Quando o dia foi lido por último (ms), para o "atualizado há". */
+  lidoEm: number | null;
+  /** A última leitura do dia falhou. */
+  falhaLeitura: boolean;
+  /** Envio em andamento: o painel mostra o progresso e a notícia que está subindo. */
+  enviando: { feitas: number; total: number; item: number } | null;
   busy: boolean;
   selIdx: number | null;
   horariosPendentes: boolean;
@@ -51,13 +63,78 @@ type Props = {
   onAtualizar: () => void;
 };
 
-const ETAPA: Record<EnvioDoDia["etapa"], { rotulo: string; classe: string }> = {
-  propagando: { rotulo: "Subindo", classe: "sub" },
-  "em-aprovacao": { rotulo: "Em aprovação", classe: "apr" },
-  "no-plano": { rotulo: "Aprovada", classe: "ok" },
-  parado: { rotulo: "Parada", classe: "err" },
-  retirada: { rotulo: "Retirada", classe: "err" },
-};
+/** `rotulo` cabe no selo do card; `detalhe` vai na linha de baixo (minutos, horário). */
+type Selo = { rotulo: string; detalhe?: string; classe: string; dica: string; passo: number };
+
+/**
+ * O selo de uma notícia enviada: em que etapa está, em palavras de quem opera,
+ * e o que falta. `passo` alimenta a barrinha de três etapas do card — subir,
+ * aprovar, ir ao ar.
+ */
+function seloDoEnvio(
+  e: EnvioDoDia,
+  estadoPack: "live" | "passou" | "vem",
+  entraAs: number,
+  agora: number,
+): Selo {
+  switch (e.etapa) {
+    case "propagando": {
+      const faltam = e.submeteEm ? Math.ceil((Date.parse(e.submeteEm) - agora) / 60_000) : null;
+      return {
+        rotulo: "Subindo",
+        detalhe: faltam && faltam > 0 ? `análise em ${faltam} min` : "indo para a análise",
+        classe: "sub",
+        dica:
+          "O material está propagando no Storage. O grupo criativo vai para a Análise Criativa " +
+          (faltam && faltam > 0 ? `em cerca de ${faltam} min.` : "no próximo minuto."),
+        passo: 1,
+      };
+    }
+    case "em-aprovacao":
+      return {
+        rotulo: "Aprovar",
+        detalhe: "no portal do Kuma",
+        classe: "apr",
+        dica: "Está na Análise Criativa do portal do Kuma, esperando aprovação.",
+        passo: 2,
+      };
+    case "no-plano":
+      if (e.noAr) return { rotulo: "No ar", classe: "noar", dica: "Está na lista que o Kuma toca agora.", passo: 3 };
+      if (estadoPack === "vem") {
+        return {
+          rotulo: "Aprovada",
+          detalhe: `entra às ${rotuloHora(entraAs)}`,
+          classe: "ok",
+          dica: `Aprovada. Entra no ar com o pack, às ${rotuloHora(entraAs)}.`,
+          passo: 3,
+        };
+      }
+      if (estadoPack === "live") {
+        return {
+          rotulo: "Aprovada",
+          detalhe: "entrando no ar…",
+          classe: "ok",
+          dica: "Aprovada. O sistema coloca ela na lista do Kuma no próximo minuto.",
+          passo: 3,
+        };
+      }
+      return {
+        rotulo: "Aprovada",
+        detalhe: "janela encerrada",
+        classe: "ok",
+        dica: "Aprovada. A janela do pack já passou.",
+        passo: 3,
+      };
+    default:
+      return { rotulo: "Parada", classe: "err", dica: e.erro ?? "", passo: 0 };
+  }
+}
+
+/** `42` → "há 42 s"; `130` → "há 2 min". */
+function ha(segundos: number): string {
+  if (segundos < 60) return `há ${Math.max(0, Math.round(segundos))} s`;
+  return `há ${Math.floor(segundos / 60)} min`;
+}
 
 /*
  * A linha do tempo mostra o dia inteiro, e não só a partir do início: o que vem
@@ -71,10 +148,18 @@ export function NewsBoxes(p: Props) {
   const [aberto, setAberto] = useState(true);
   const [alvo, setAlvo] = useState<number | null>(null);
   const trilho = useRef<HTMLDivElement>(null);
+  const [agora, setAgora] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setAgora(Date.now()), 5_000);
+    return () => clearInterval(t);
+  }, []);
 
   const enviados = (p.dia?.envios ?? []).filter((e) => e.etapa !== "parado" && e.etapa !== "retirada");
   const retiradas = (p.dia?.envios ?? []).filter((e) => e.etapa === "retirada");
   const parados = (p.dia?.envios ?? []).filter((e) => e.etapa === "parado");
+  const subindo = enviados.filter((e) => e.etapa === "propagando").length;
+  const aprovar = enviados.filter((e) => e.etapa === "em-aprovacao").length;
+  const aprovadas = enviados.filter((e) => e.etapa === "no-plano").length;
   const pendentes = [...p.alocacao.entries()];
   const hora = p.dia?.hora ?? null;
   const caixaDaHora = hora === null ? null : caixaPedida(p.cortes, hora, p.inicio);
@@ -151,8 +236,27 @@ export function NewsBoxes(p: Props) {
           )}
         </button>
 
+        {!p.dia ? (
+          <div className="boxes-resumo">
+            <span className={p.falhaLeitura ? "boxes-lido err" : "boxes-lido"}>
+              {p.falhaLeitura ? "não deu para ler a programação" : <><span className="spinner mini" /> lendo a programação…</>}
+            </span>
+          </div>
+        ) : (
         <div className="boxes-resumo">
-          <span><b>{enviados.length}</b> enviada{enviados.length === 1 ? "" : "s"}</span>
+          {subindo > 0 && (
+            <span className="etapa-chip sub" title="Material propagando; vai para a Análise Criativa em ~10 min">
+              <i /> {subindo} subindo
+            </span>
+          )}
+          {aprovar > 0 && (
+            <span className="etapa-chip apr" title="Esperando aprovação na Análise Criativa do portal do Kuma">
+              <i /> {aprovar} para aprovar no Kuma
+            </span>
+          )}
+          <span className="etapa-chip ok" title="Aprovadas e no plano do dia">
+            <i /> {aprovadas} aprovada{aprovadas === 1 ? "" : "s"}
+          </span>
           <span className="sep" />
           <span><b>{totalPendentes}</b> na fila</span>
           <span className="sep" />
@@ -163,12 +267,20 @@ export function NewsBoxes(p: Props) {
             </span>
           )}
         </div>
+        )}
 
         <div className="boxes-acoes">
-          <button className="btn btn-ghost btn-sm" onClick={p.onDuasHoras} disabled={p.busy}
+          <button className="btn btn-ghost btn-sm" onClick={p.onDuasHoras} disabled={p.busy || !p.dia}
             title="Divide o dia em packs de 2 horas, a partir do início do pack 1">
             De 2 em 2 h
           </button>
+          <span className={`boxes-lido${p.falhaLeitura ? " err" : ""}`}>
+            {p.falhaLeitura
+              ? "falha ao atualizar"
+              : p.lidoEm !== null
+                ? `atualizado ${ha((agora - p.lidoEm) / 1000)}`
+                : ""}
+          </span>
           <button className="btn btn-ghost btn-sm" onClick={p.onAtualizar} disabled={p.carregando}
             title="Relê o que já foi enviado hoje">
             {p.carregando ? <span className="spinner" /> : "↻"}
@@ -180,13 +292,52 @@ export function NewsBoxes(p: Props) {
           )}
           <button className="btn btn-accent btn-sm boxes-enviar" onClick={p.onEnviar}
             disabled={!totalPendentes || p.busy}>
-            🚀 Enviar {totalPendentes || ""} {totalPendentes === 1 ? "notícia" : "notícias"}
-            {caixasUsadas > 1 ? ` em ${caixasUsadas} packs` : ""}
+            {p.enviando ? (
+              <><span className="spinner" /> Enviando {p.enviando.feitas + 1} de {p.enviando.total}…</>
+            ) : (
+              <>
+                🚀 Enviar {totalPendentes || ""} {totalPendentes === 1 ? "notícia" : "notícias"}
+                {caixasUsadas > 1 ? ` em ${caixasUsadas} packs` : ""}
+              </>
+            )}
           </button>
         </div>
       </header>
 
-      {aberto && (
+      {p.enviando && (
+        <div className="boxes-progresso" title={`${p.enviando.feitas} de ${p.enviando.total} enviadas`}>
+          <i style={{ width: `${(p.enviando.feitas / p.enviando.total) * 100}%` }} />
+        </div>
+      )}
+
+      {aberto && !p.dia && (
+        <div className="boxes-body">
+          {p.falhaLeitura ? (
+            <div className="boxes-falha">
+              Não deu para ler a programação do dia.
+              <button className="btn btn-ghost btn-sm" onClick={p.onAtualizar} disabled={p.carregando}>
+                {p.carregando ? <span className="spinner" /> : "Tentar de novo"}
+              </button>
+            </div>
+          ) : (
+            <div className="boxes-skel" aria-label="Lendo a programação do dia">
+              <div className="skel skel-trilho" />
+              <div className="bx-row">
+                {[0, 1].map((k) => (
+                  <div key={k} className="bx bx-skel">
+                    <div className="skel skel-line" />
+                    <div className="bx-slots">
+                      {[0, 1, 2, 3].map((s) => <div key={s} className="slot skel" />)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {aberto && p.dia && (
         <div className="boxes-body">
           {/* ── Linha do tempo ───────────────────────────────── */}
           <div className="tl">
@@ -319,18 +470,28 @@ export function NewsBoxes(p: Props) {
                   </div>
 
                   <div className="bx-slots">
-                    {deles.map((e) => (
-                      <div key={e.id} className={`slot enviado${e.noAr ? " noar" : ""}`} title={e.titulo}>
+                    {deles.map((e) => {
+                      const selo = seloDoEnvio(e, estado, j.inicio, agora);
+                      return (
+                      <div key={e.id} className={`slot enviado${e.noAr ? " noar" : ""}`}
+                        title={`${e.titulo}\n\n${selo.dica}`}>
                         {e.miniatura ? (
                           // eslint-disable-next-line @next/next/no-img-element
                           <img src={e.miniatura} alt="" loading="lazy" />
                         ) : (
                           <div className="slot-ph">📰</div>
                         )}
-                        <span className={`slot-etapa ${ETAPA[e.etapa].classe}`}>
-                          {e.noAr ? "● No ar" : ETAPA[e.etapa].rotulo}
+                        <span className={`slot-etapa ${selo.classe}`}>
+                          <i />
+                          {selo.rotulo}
                         </span>
+                        {selo.detalhe && <span className="slot-etapa-det">{selo.detalhe}</span>}
                         <span className="slot-tit">{e.titulo}</span>
+                        <span className="slot-passos" aria-hidden>
+                          {[1, 2, 3].map((n) => (
+                            <i key={n} className={n < selo.passo ? "feito" : n === selo.passo ? `atual ${selo.classe}` : ""} />
+                          ))}
+                        </span>
                         <button
                           className="slot-x"
                           onClick={() => p.onRetirar(e.id, e.titulo)}
@@ -340,7 +501,8 @@ export function NewsBoxes(p: Props) {
                           ×
                         </button>
                       </div>
-                    ))}
+                      );
+                    })}
 
                     {meus.map((i) => {
                       const it = p.items[i];
@@ -365,7 +527,11 @@ export function NewsBoxes(p: Props) {
                           ) : (
                             <div className="slot-ph">📰</div>
                           )}
-                          <span className="slot-etapa novo">Na fila</span>
+                          {p.enviando?.item === i ? (
+                            <span className="slot-etapa sub"><span className="spinner mini" />Enviando</span>
+                          ) : (
+                            <span className="slot-etapa novo">Na fila</span>
+                          )}
                           <span className="slot-tit">{it.title}</span>
                           <button
                             className="slot-x"
@@ -432,13 +598,20 @@ export function NewsBoxes(p: Props) {
                 {" "}{retiradas.length} retirada{retiradas.length === 1 ? "" : "s"} do pack hoje.
               </span>
             )}
-            {parados.length > 0 && (
-              <span className="boxes-parados">
-                {" "}⚠ {parados.length} envio{parados.length === 1 ? "" : "s"} parado{parados.length === 1 ? "" : "s"}:{" "}
-                {parados.map((e) => `${e.id} (${e.erro})`).join(" · ")}
-              </span>
-            )}
           </p>
+
+          {parados.length > 0 && (
+            <ul className="boxes-alertas">
+              {parados.map((e) => (
+                <li key={e.id}>
+                  <b>⚠ Parada</b>
+                  <span className="t">{e.titulo}</span>
+                  <span className="m">{e.erro}</span>
+                  <code>{e.id}</code>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </section>

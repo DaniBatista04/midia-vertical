@@ -1077,12 +1077,16 @@ input[type="range"]::-moz-range-thumb {
 }
 .boxes-resumo {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px 10px;
   font-size: 11px;
   color: #a8a8a8;
   flex: 1;
   min-width: 0;
+}
+.boxes-resumo > span {
+  white-space: nowrap;
 }
 .boxes-resumo b {
   color: var(--text);
@@ -1635,4 +1639,232 @@ input[type="range"]::-moz-range-thumb {
 }
 .boxes-parados {
   color: var(--red);
+}
+
+/* ── Status das notícias enviadas ───────────────────────────── */
+.etapa-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.etapa-chip i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.etapa-chip.sub { color: var(--blue); }
+.etapa-chip.ok { color: #4cff91; }
+.etapa-chip.apr {
+  color: var(--warn);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent);
+}
+.etapa-chip.apr i,
+.slot-etapa.apr i {
+  animation: pulso-etapa 1.4s ease-in-out infinite;
+}
+@keyframes pulso-etapa {
+  50% { opacity: 0.25; }
+}
+
+.slot-etapa {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100% - 12px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slot-etapa i {
+  flex-shrink: 0;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.slot-etapa.novo i { display: none; }
+.slot-etapa.sub { color: var(--blue); }
+.slot-etapa.noar {
+  color: #111;
+  background: var(--c);
+}
+.slot.enviado:hover .slot-etapa {
+  max-width: calc(100% - 36px);
+}
+
+/* As três etapas do envio — subir, aprovar, ir ao ar —, na borda de baixo do card. */
+.slot-passos {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  height: 3px;
+}
+.slot-passos i {
+  background: #ffffff1f;
+}
+.slot-passos i.feito {
+  background: #4cff91;
+}
+.slot-passos i.atual.sub { background: var(--blue); }
+.slot-passos i.atual.apr { background: var(--warn); animation: pulso-etapa 1.4s ease-in-out infinite; }
+.slot-passos i.atual.ok { background: #4cff91; }
+.slot-passos i.atual.noar { background: var(--c); }
+.slot.enviado .slot-tit {
+  bottom: 9px;
+}
+.slot-etapa-det {
+  position: absolute;
+  top: 25px;
+  left: 7px;
+  right: 7px;
+  z-index: 1;
+  font-size: 9px;
+  font-weight: 600;
+  color: #e0e0e0;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.spinner.mini {
+  width: 9px;
+  height: 9px;
+  border-width: 1.5px;
+}
+
+.boxes-lido {
+  font-size: 10.5px;
+  color: #8a8a8a;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.boxes-lido {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.boxes-lido.err {
+  color: var(--red);
+}
+
+/* Envio em andamento: uma barra fina embaixo do cabeçalho da programação. */
+.boxes-progresso {
+  height: 2px;
+  background: #ffffff10;
+}
+.boxes-progresso i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.boxes-alertas {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.boxes-alertas li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  font-size: 11px;
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 30%, transparent);
+}
+.boxes-alertas b {
+  color: var(--red);
+  white-space: nowrap;
+}
+.boxes-alertas .t {
+  color: #e6e6e6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 45%;
+}
+.boxes-alertas .m {
+  color: #b0b0b0;
+  flex: 1;
+}
+.boxes-alertas code {
+  color: #777;
+  font-size: 10px;
+}
+
+.boxes-falha {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ── Placeholders de carregamento ───────────────────────────── */
+.skel {
+  background: linear-gradient(90deg, #ffffff08 0%, #ffffff14 50%, #ffffff08 100%);
+  background-size: 200% 100%;
+  animation: skel 1.3s ease-in-out infinite;
+  border-radius: 6px;
+}
+@keyframes skel {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+.skel-line {
+  height: 10px;
+  margin-bottom: 8px;
+}
+.skel-line.curta {
+  width: 55%;
+}
+.skel-trilho {
+  height: 34px;
+  border-radius: 10px;
+  margin: 18px 8px 34px;
+}
+.bx-skel {
+  pointer-events: none;
+}
+.bx-skel > .skel-line {
+  width: 40%;
+  height: 14px;
+  margin: 4px 0 14px;
+}
+.slot.skel {
+  border: 0;
+}
+.slot.skel::after {
+  display: none;
+}
+.feed-skel {
+  cursor: default;
+}
+.feed-skel .fthumb.skel {
+  flex-shrink: 0;
+}
+.feed-skel .finfo {
+  flex: 1;
+  padding-top: 4px;
 }
