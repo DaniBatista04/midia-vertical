@@ -125,7 +125,10 @@ cada uma com a sua janela — oito notícias viram duas caixas, a primeira até 
 meia-noite, com os cortes em hora par. A **Programação do dia**, embaixo dos
 previews, mostra a linha do tempo e as caixas: marcar notícia na fila enche a
 primeira caixa com vaga (e abre a seguinte), dá para arrastar notícia entre
-caixas e arrastar o divisor para mudar o horário da troca.
+caixas e arrastar o divisor para mudar o horário da troca. O início do pack 1
+também se arrasta (padrão 6h): antes dele fica no ar o **último** pack do dia,
+dando a volta no relógio — a unidade não tem `hours`, então a madrugada nunca
+fica sem notícia, e segue com o pack da noite até o da manhã entrar.
 
 A unidade continua **uma por dia**. A API não tem estratégia por hora, então
 quem vira a caixa é o cron de minuto: `sincronizarEstrategia` confere qual caixa

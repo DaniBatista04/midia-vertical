@@ -1144,7 +1144,7 @@ input[type="range"]::-moz-range-thumb {
   height: 34px;
   border-radius: 10px;
   background:
-    repeating-linear-gradient(90deg, #ffffff08 0 1px, transparent 1px calc(100% / 9)),
+    repeating-linear-gradient(90deg, #ffffff08 0 1px, transparent 1px calc(100% / 12)),
     #161616;
   border: 1px solid #ffffff10;
   touch-action: none;
@@ -1170,6 +1170,18 @@ input[type="range"]::-moz-range-thumb {
     color-mix(in srgb, var(--c) 30%, transparent)
   );
   box-shadow: 0 0 18px color-mix(in srgb, var(--c) 35%, transparent);
+}
+/* A madrugada: o último pack dando a volta no relógio até o pack 1 entrar. */
+.tl-seg.volta {
+  background:
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--c) 22%, transparent) 0 6px, transparent 6px 12px),
+    color-mix(in srgb, var(--c) 8%, transparent);
+  border-style: dashed;
+}
+.tl-seg.volta.live {
+  background:
+    repeating-linear-gradient(135deg, color-mix(in srgb, var(--c) 45%, transparent) 0 6px, transparent 6px 12px),
+    color-mix(in srgb, var(--c) 20%, transparent);
 }
 .tl-seg-lbl {
   position: absolute;
@@ -1223,6 +1235,13 @@ input[type="range"]::-moz-range-thumb {
 .tl-cut:hover .tl-cut-knob,
 .tl-cut:active .tl-cut-knob {
   transform: scale(1.25);
+}
+.tl-ini::before {
+  background: repeating-linear-gradient(180deg, #fff 0 4px, transparent 4px 7px);
+}
+.tl-ini .tl-cut-knob {
+  border-radius: 3px;
+  width: 10px;
 }
 .tl-cut-lbl {
   position: absolute;

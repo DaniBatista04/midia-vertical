@@ -7,7 +7,7 @@ import { useToast } from "@/components/useToast";
 import type { DiaNoticias } from "@/app/api/noticias/dia/route";
 import { NewsBoxes } from "@/components/news/NewsBoxes";
 import { kumaFilename } from "@/lib/kuma/filename";
-import { ajustarCortes, cortesPadrao, MAX_CAIXAS } from "@/lib/kuma/noticiaCaixas";
+import { ajustarCortes, cortesPadrao, INICIO_DIA, MAX_CAIXAS } from "@/lib/kuma/noticiaCaixas";
 import { drawCard, proxiedImage, renderJpeg, type TitleFit } from "@/lib/news/draw";
 import { parseFeed } from "@/lib/news/feed";
 import {
@@ -46,6 +46,7 @@ export function NewsGenerator() {
   const [escolhidas, setEscolhidas] = useState<Map<number, number>>(new Map());
   const [caixasManual, setCaixasManual] = useState(1);
   const [cortesLocal, setCortesLocal] = useState<number[] | null>(null);
+  const [inicioLocal, setInicioLocal] = useState<number | null>(null);
 
   const canvasRefs = useRef<(HTMLCanvasElement | null)[]>([null, null]);
 
@@ -139,9 +140,15 @@ export function NewsGenerator() {
     ...enviadosPorCaixa.keys(),
     ...alocacao.values(),
   );
-  const cortes = ajustarCortes(cortesLocal ?? dia?.cortesGravados ?? cortesPadrao(caixas), caixas);
+  const inicio = inicioLocal ?? dia?.inicio ?? INICIO_DIA;
+  const cortes = ajustarCortes(
+    cortesLocal ?? dia?.cortesGravados ?? cortesPadrao(caixas, inicio),
+    caixas,
+    inicio,
+  );
   const horariosPendentes =
-    cortesLocal !== null && JSON.stringify(cortes) !== JSON.stringify(dia?.cortes ?? []);
+    (cortesLocal !== null && JSON.stringify(cortes) !== JSON.stringify(dia?.cortes ?? [])) ||
+    (inicioLocal !== null && inicio !== (dia?.inicio ?? INICIO_DIA));
   const semVaga = queue.size - alocacao.size;
 
   const moverParaCaixa = (item: number, caixa: number, trocarCom?: number) => {
@@ -171,12 +178,13 @@ export function NewsGenerator() {
       const r = await fetch("/api/noticias/dia", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cortes }),
+        body: JSON.stringify({ cortes, inicio }),
       });
       const corpo = await r.json();
       if (!r.ok) throw new Error(corpo?.error ?? `HTTP ${r.status}`);
       toast("Horários dos packs salvos", "ok");
       setCortesLocal(null);
+      setInicioLocal(null);
       await carregarDia();
     } catch (e) {
       toast(`Erro ao salvar horários: ${e instanceof Error ? e.message : e}`, "err");
@@ -375,6 +383,7 @@ export function NewsGenerator() {
               duracao: 10,
               caixa,
               cortes,
+              inicio,
               imagem32: await base64(item, 0),
               imagem25: await base64(item, 1),
             }),
@@ -399,6 +408,7 @@ export function NewsGenerator() {
       const feitos = new Set(enviados);
       setQueue((q) => new Set([...q].filter((i) => !feitos.has(i))));
       setCortesLocal(null);
+      setInicioLocal(null);
       void carregarDia();
     }
     if (falhas.length) {
@@ -791,6 +801,7 @@ export function NewsGenerator() {
         maxCaixas={dia?.maxCaixas ?? MAX_CAIXAS}
         vagas={vagas}
         cortes={cortes}
+        inicio={inicio}
         dia={dia}
         carregando={carregandoDia}
         busy={busy}
@@ -800,6 +811,7 @@ export function NewsGenerator() {
         onRemover={(i) => toggleQueue(i)}
         onSelecionar={(i) => setSelIdx(i)}
         onCortes={setCortesLocal}
+        onInicio={setInicioLocal}
         onNovaCaixa={() => setCaixasManual(Math.min(caixas + 1, MAX_CAIXAS))}
         onRemoverCaixa={(c) => setCaixasManual(Math.max(1, c - 1))}
         onEnviar={() => void enviarParaKuma()}

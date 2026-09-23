@@ -44,9 +44,14 @@ export const MAX_CAIXAS = 4;
  * Onde o dia começa e termina para a divisão das janelas, em horas cheias.
  *
  * As notícias passam antes e depois do horário comercial, então a divisão não
- * pode ser a das faixas de comunicado (10h–18h). A caixa 1 também cobre a
- * madrugada — o que estiver antes do primeiro corte é dela —, mas dividir a
- * partir da meia-noite daria à caixa 1 horas em que o prédio está dormindo.
+ * pode ser a das faixas de comunicado (10h–18h). Dividir a partir da meia-noite
+ * daria à caixa 1 horas em que o prédio está dormindo.
+ *
+ * `INICIO_DIA` é só o padrão: o operador escolhe no painel a hora em que a
+ * caixa 1 entra (`GradeNoticias.inicio`). O que vem antes dela é da **última**
+ * caixa, dando a volta no relógio — a unidade não tem `hours` (ver o topo), então
+ * a estratégia nunca fica vazia, e a madrugada segue com o pack da noite até o
+ * da manhã entrar.
  */
 export const INICIO_DIA = 6;
 export const FIM_DIA = 24;
@@ -67,6 +72,11 @@ export type GradeNoticias = {
   data: string;
   /** Hora em que cada caixa seguinte entra no ar. `[16]` = duas caixas, troca às 16h. */
   cortes: number[];
+  /**
+   * Hora em que a caixa 1 entra no ar; antes dela fica a última. Ausente nas
+   * grades de antes do campo, que valem como `INICIO_DIA`.
+   */
+  inicio?: number;
   atualizadoEm: string;
 };
 
@@ -76,29 +86,44 @@ export function caminhoGrade(dataISO: string): string {
   return `${PREFIXO_GRADES}/${dataISO}.json`;
 }
 
+/** O início serve? Hora inteira, com espaço para pelo menos uma faixa de duas horas. */
+export function inicioValido(inicio: unknown): inicio is number {
+  return Number.isInteger(inicio) && (inicio as number) >= 0 && (inicio as number) <= FIM_DIA - 2;
+}
+
+/** A hora em que a caixa 1 entra num dia: a da grade, se servir, e senão `INICIO_DIA`. */
+export function inicioDoDia(grade: Pick<GradeNoticias, "inicio"> | null): number {
+  const inicio = grade?.inicio;
+  return inicioValido(inicio) ? inicio : INICIO_DIA;
+}
+
 /**
  * A divisão padrão do dia em `n` caixas.
  *
- * Partes iguais entre `INICIO_DIA` e `FIM_DIA`, com cada corte arredondado para
+ * Partes iguais entre o início e `FIM_DIA`, com cada corte arredondado para
  * hora par: é onde as faixas do Kuma viram, e um corte às 15h só chegaria à
  * tela às 16h de qualquer jeito. Duas caixas trocam às 16h; três às 12h e 18h;
  * quatro às 10h, 16h e 20h.
  */
-export function cortesPadrao(n: number): number[] {
+export function cortesPadrao(n: number, inicio: number = INICIO_DIA): number[] {
   const caixas = Math.min(Math.max(1, Math.floor(n)), MAX_CAIXAS);
-  const passo = (FIM_DIA - INICIO_DIA) / caixas;
-  return Array.from({ length: caixas - 1 }, (_, k) =>
-    Math.round((INICIO_DIA + passo * (k + 1)) / 2) * 2,
+  const passo = (FIM_DIA - inicio) / caixas;
+  const cortes = Array.from({ length: caixas - 1 }, (_, k) =>
+    Math.round((inicio + passo * (k + 1)) / 2) * 2,
   );
+  // Início tardio aperta as janelas, e o arredondamento pode encostar dois
+  // cortes: aí vale a divisão exata, em hora cheia.
+  if (cortesValidos(cortes, caixas, inicio)) return cortes;
+  return Array.from({ length: caixas - 1 }, (_, k) => Math.round(inicio + passo * (k + 1)));
 }
 
-/** Os cortes servem para `n` caixas? Horas inteiras, crescentes, dentro do dia. */
-export function cortesValidos(cortes: unknown, n: number): cortes is number[] {
+/** Os cortes servem para `n` caixas? Horas inteiras, crescentes, depois do início. */
+export function cortesValidos(cortes: unknown, n: number, inicio: number = INICIO_DIA): cortes is number[] {
   if (!Array.isArray(cortes) || cortes.length !== n - 1) return false;
   return cortes.every(
     (h, i) =>
       Number.isInteger(h) &&
-      h > INICIO_DIA &&
+      h > inicio &&
       h < FIM_DIA &&
       (i === 0 || h > cortes[i - 1]),
   );
@@ -115,11 +140,15 @@ export function cortesValidos(cortes: unknown, n: number): cortes is number[] {
  * notícias depois sem mexer nos horários, e aí a divisão padrão mantém toda
  * caixa com janela.
  */
-export function cortesDoDia(grade: Pick<GradeNoticias, "cortes"> | null, n: number): number[] {
+export function cortesDoDia(
+  grade: Pick<GradeNoticias, "cortes" | "inicio"> | null,
+  n: number,
+): number[] {
+  const inicio = inicioDoDia(grade);
   const cortes = grade?.cortes;
   const tamanho = Array.isArray(cortes) ? cortes.length : -1;
-  if (cortesValidos(cortes, tamanho + 1) && tamanho >= n - 1) return cortes.slice(0, n - 1);
-  return cortesPadrao(n);
+  if (cortesValidos(cortes, tamanho + 1, inicio) && tamanho >= n - 1) return cortes.slice(0, n - 1);
+  return cortesPadrao(n, inicio);
 }
 
 /**
@@ -131,21 +160,25 @@ export function cortesDoDia(grade: Pick<GradeNoticias, "cortes"> | null, n: numb
  * padrão desfaria o horário que ele acabou de escolher. Quando a última janela
  * não comporta mais um corte em hora par, cai na divisão padrão.
  */
-export function ajustarCortes(cortes: number[], n: number): number[] {
-  if (!cortesValidos(cortes, cortes.length + 1)) return cortesPadrao(n);
+export function ajustarCortes(cortes: number[], n: number, inicio: number = INICIO_DIA): number[] {
+  if (!cortesValidos(cortes, cortes.length + 1, inicio)) return cortesPadrao(n, inicio);
   if (cortes.length >= n - 1) return cortes.slice(0, Math.max(0, n - 1));
   const novos = [...cortes];
   while (novos.length < n - 1) {
-    const ultimo = novos.at(-1) ?? INICIO_DIA;
+    const ultimo = novos.at(-1) ?? inicio;
     const meio = Math.round((ultimo + FIM_DIA) / 4) * 2;
-    if (meio <= ultimo || meio >= FIM_DIA) return cortesPadrao(n);
+    if (meio <= ultimo || meio >= FIM_DIA) return cortesPadrao(n, inicio);
     novos.push(meio);
   }
   return novos;
 }
 
-/** Qual caixa a hora pede. `hora` é fracionária, no fuso de São Paulo. */
-export function caixaDaHora(cortes: number[], hora: number): number {
+/**
+ * Qual caixa a hora pede. `hora` é fracionária, no fuso de São Paulo. Antes do
+ * início é a última, que vem da noite anterior dando a volta no relógio.
+ */
+export function caixaDaHora(cortes: number[], hora: number, inicio: number = INICIO_DIA): number {
+  if (hora < inicio) return cortes.length + 1;
   return cortes.filter((c) => hora >= c).length + 1;
 }
 
@@ -198,17 +231,19 @@ export type EstrategiaDaHora = {
  *
  * O número de caixas é o da maior caixa com notícia amarrada, e não o de
  * caixas com notícia: uma caixa 2 vazia entre a 1 e a 3 continua ocupando a
- * janela dela, preenchida pela 1, em vez de a 3 mudar de horário.
+ * janela dela, preenchida pela 1, em vez de a 3 mudar de horário. É também a
+ * caixa de antes do início: a madrugada fica com a última caixa aprovada, e não
+ * com uma que a grade prevê mas ainda está na Análise Criativa.
  */
 export function estrategiaDaHora(
   plano: { grupos: string[]; caixaDoGrupo?: Record<string, number>; frequencia: number },
-  grade: Pick<GradeNoticias, "cortes"> | null,
+  grade: Pick<GradeNoticias, "cortes" | "inicio"> | null,
   hora: number,
 ): EstrategiaDaHora {
   const porCaixa = gruposPorCaixa(plano.grupos, plano.caixaDoGrupo);
   const caixas = Math.max(1, ...porCaixa.keys());
   const cortes = cortesDoDia(grade, caixas);
-  const pedida = caixaDaHora(cortes, hora);
+  const pedida = caixaDaHora(cortes, hora, inicioDoDia(grade));
 
   const comNoticia = [...porCaixa.keys()].sort((a, b) => a - b);
   const anterior = comNoticia.filter((c) => c <= pedida).pop();

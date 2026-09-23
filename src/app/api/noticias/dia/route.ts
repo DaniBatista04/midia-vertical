@@ -7,6 +7,8 @@ import {
   cortesValidos,
   estrategiaDaHora,
   horaEmSaoPaulo,
+  inicioDoDia,
+  inicioValido,
   MAX_CAIXAS,
   vagasPorCaixa,
   type GradeNoticias,
@@ -50,6 +52,8 @@ export type DiaNoticias = {
   cortesGravados: number[] | null;
   /** Cortes que o cron está usando agora, para o número de caixas do plano. */
   cortes: number[];
+  /** Hora em que a caixa 1 entra; antes dela fica a última. */
+  inicio: number;
   caixaNoAr: number | null;
   unidadeId: string | null;
   envios: EnvioDoDia[];
@@ -84,6 +88,7 @@ export async function GET(req: NextRequest) {
       maxCaixas: MAX_CAIXAS,
       cortesGravados: grade?.cortes ?? null,
       cortes: cortesDoDia(grade, caixas),
+      inicio: inicioDoDia(grade),
       caixaNoAr: agora?.caixa ?? null,
       unidadeId: plano?.unidadeId ?? null,
       envios: envios.map((e) => ({
@@ -107,13 +112,17 @@ export async function PUT(req: NextRequest) {
   if (!data) return Response.json({ error: "Data inválida — use YYYY-MM-DD." }, { status: 400 });
 
   let cortes: unknown;
+  let inicio: unknown;
   try {
-    cortes = ((await req.json()) as { cortes?: unknown }).cortes;
+    ({ cortes, inicio } = (await req.json()) as { cortes?: unknown; inicio?: unknown });
   } catch {
     return Response.json({ error: "Requisição inválida." }, { status: 400 });
   }
+  if (inicio !== undefined && !inicioValido(inicio)) {
+    return Response.json({ error: `Início do pack 1 inválido: ${JSON.stringify(inicio)}.` }, { status: 400 });
+  }
   const n = Array.isArray(cortes) ? cortes.length + 1 : 0;
-  if (!cortesValidos(cortes, n)) {
+  if (!cortesValidos(cortes, n, inicio as number | undefined)) {
     return Response.json({ error: `Horários inválidos: ${JSON.stringify(cortes)}.` }, { status: 400 });
   }
 
@@ -131,7 +140,12 @@ export async function PUT(req: NextRequest) {
     );
   }
 
-  const grade: GradeNoticias = { data, cortes, atualizadoEm: new Date().toISOString() };
+  const grade: GradeNoticias = {
+    data,
+    cortes,
+    ...(inicio !== undefined ? { inicio } : {}),
+    atualizadoEm: new Date().toISOString(),
+  };
   await uploadPublico({
     caminho: caminhoGrade(data),
     conteudo: Buffer.from(JSON.stringify(grade, null, 2)),

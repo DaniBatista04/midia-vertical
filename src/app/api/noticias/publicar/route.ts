@@ -4,6 +4,7 @@ import { dataEmSaoPaulo, FREQUENCIA_PADRAO } from "@/lib/kuma/agendar";
 import {
   caminhoGrade,
   cortesValidos,
+  inicioValido,
   MAX_CAIXAS,
   vagasPorCaixa,
   type GradeNoticias,
@@ -51,6 +52,8 @@ type Corpo = {
    * caixas trocando às 16h. Opcional: sem ele vale a divisão padrão.
    */
   cortes?: number[];
+  /** Hora em que a caixa 1 entra; antes dela fica a última. Sem ela, `INICIO_DIA`. */
+  inicio?: number;
   /** JPG 1080×1920, em base64 sem prefixo. */
   imagem32?: string;
   /** JPG 1080×2560, em base64 sem prefixo. */
@@ -93,9 +96,15 @@ export async function POST(req: NextRequest) {
       { status: 400 },
     );
   }
+  if (corpo.inicio !== undefined && !inicioValido(corpo.inicio)) {
+    return Response.json(
+      { error: `Início do pack 1 inválido: ${JSON.stringify(corpo.inicio)}.` },
+      { status: 400 },
+    );
+  }
   if (corpo.cortes !== undefined) {
     const n = Array.isArray(corpo.cortes) ? corpo.cortes.length + 1 : 0;
-    if (!cortesValidos(corpo.cortes, n) || caixa > n) {
+    if (!cortesValidos(corpo.cortes, n, corpo.inicio) || caixa > n) {
       return Response.json(
         { error: `Horários dos packs inválidos: ${JSON.stringify(corpo.cortes)}.` },
         { status: 400 },
@@ -172,7 +181,12 @@ export async function POST(req: NextRequest) {
   // gravada vale. Grava antes do upload para que um lote interrompido no meio
   // não deixe as caixas já enviadas com o horário antigo.
   if (corpo.cortes) {
-    const grade: GradeNoticias = { data, cortes: corpo.cortes, atualizadoEm: new Date().toISOString() };
+    const grade: GradeNoticias = {
+      data,
+      cortes: corpo.cortes,
+      ...(corpo.inicio !== undefined ? { inicio: corpo.inicio } : {}),
+      atualizadoEm: new Date().toISOString(),
+    };
     await uploadPublico({
       caminho: caminhoGrade(data),
       conteudo: Buffer.from(JSON.stringify(grade, null, 2)),

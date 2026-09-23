@@ -5,7 +5,7 @@ import { useRef, useState, type DragEvent, type PointerEvent as ReactPointerEven
 import type { DiaNoticias, EnvioDoDia } from "@/app/api/noticias/dia/route";
 import { proxiedImage } from "@/lib/news/draw";
 import type { NewsItem } from "@/lib/news/spec";
-import { FIM_DIA, INICIO_DIA, rotuloHora } from "@/lib/kuma/noticiaCaixas";
+import { caixaDaHora as caixaPedida, FIM_DIA, rotuloHora } from "@/lib/kuma/noticiaCaixas";
 
 /**
  * A programação do dia: a linha do tempo com as janelas e, embaixo, uma caixa
@@ -26,6 +26,8 @@ type Props = {
   maxCaixas: number;
   vagas: number;
   cortes: number[];
+  /** Hora em que o pack 1 entra; antes dela fica o último. */
+  inicio: number;
   dia: DiaNoticias | null;
   carregando: boolean;
   busy: boolean;
@@ -35,6 +37,7 @@ type Props = {
   onRemover: (item: number) => void;
   onSelecionar: (item: number) => void;
   onCortes: (cortes: number[]) => void;
+  onInicio: (inicio: number) => void;
   onNovaCaixa: () => void;
   onRemoverCaixa: (caixa: number) => void;
   onEnviar: () => void;
@@ -49,8 +52,13 @@ const ETAPA: Record<EnvioDoDia["etapa"], { rotulo: string; classe: string }> = {
   parado: { rotulo: "Parada", classe: "err" },
 };
 
-const HORAS = FIM_DIA - INICIO_DIA;
-const pct = (h: number) => `${((Math.min(Math.max(h, INICIO_DIA), FIM_DIA) - INICIO_DIA) / HORAS) * 100}%`;
+/*
+ * A linha do tempo mostra o dia inteiro, e não só a partir do início: o que vem
+ * antes do pack 1 é do último, e o operador precisa ver isso para escolher o
+ * início.
+ */
+const HORAS = FIM_DIA;
+const pct = (h: number) => `${(Math.min(Math.max(h, 0), FIM_DIA) / HORAS) * 100}%`;
 
 export function NewsBoxes(p: Props) {
   const [aberto, setAberto] = useState(true);
@@ -61,15 +69,18 @@ export function NewsBoxes(p: Props) {
   const parados = (p.dia?.envios ?? []).filter((e) => e.etapa === "parado");
   const pendentes = [...p.alocacao.entries()];
   const hora = p.dia?.hora ?? null;
-  const caixaDaHora = hora === null ? null : p.cortes.filter((c) => hora >= c).length + 1;
+  const caixaDaHora = hora === null ? null : caixaPedida(p.cortes, hora, p.inicio);
+  /** Madrugada: o último pack segue no ar, e os outros ainda estão por vir. */
+  const antesDoInicio = hora !== null && hora < p.inicio && p.caixas > 1;
   const noAr = p.dia?.caixaNoAr ?? null;
+  const volta = p.caixas > 1 && p.inicio > 0;
 
   const janela = (c: number) => ({
-    inicio: c === 1 ? INICIO_DIA : p.cortes[c - 2],
+    inicio: c === 1 ? (p.caixas === 1 ? 0 : p.inicio) : p.cortes[c - 2],
     fim: c === p.caixas ? FIM_DIA : p.cortes[c - 1],
   });
 
-  /* ── Arrastar o divisor entre duas janelas ───────────────── */
+  /* ── Arrastar um divisor: o início do pack 1 (`i = -1`) ou uma troca ── */
   const arrastarCorte = (i: number) => (ev: ReactPointerEvent<HTMLDivElement>) => {
     ev.preventDefault();
     const el = trilho.current;
@@ -78,11 +89,16 @@ export function NewsBoxes(p: Props) {
     alvoEl.setPointerCapture(ev.pointerId);
     const mover = (e: PointerEvent) => {
       const r = el.getBoundingClientRect();
-      const h = INICIO_DIA + ((e.clientX - r.left) / r.width) * HORAS;
+      const h = ((e.clientX - r.left) / r.width) * HORAS;
       // Hora par: é onde a faixa do Kuma vira, e um corte fora dela só
       // chegaria à tela na próxima de qualquer jeito.
       let alvoH = Math.round(h / 2) * 2;
-      const min = (i === 0 ? INICIO_DIA : p.cortes[i - 1]) + 2;
+      if (i < 0) {
+        alvoH = Math.min(Math.max(alvoH, 0), (p.cortes[0] ?? FIM_DIA) - 2);
+        if (alvoH !== p.inicio) p.onInicio(alvoH);
+        return;
+      }
+      const min = (i === 0 ? p.inicio : p.cortes[i - 1]) + 2;
       const max = (i === p.cortes.length - 1 ? FIM_DIA : p.cortes[i + 1]) - 2;
       alvoH = Math.min(Math.max(alvoH, min), max);
       if (alvoH !== p.cortes[i]) p.onCortes(p.cortes.map((c, k) => (k === i ? alvoH : c)));
@@ -165,10 +181,11 @@ export function NewsBoxes(p: Props) {
               {Array.from({ length: p.caixas }, (_, k) => {
                 const c = k + 1;
                 const j = janela(c);
+                const live = noAr === c && !(antesDoInicio && c === p.caixas);
                 return (
                   <div
                     key={c}
-                    className={`tl-seg${noAr === c ? " live" : ""}`}
+                    className={`tl-seg${live ? " live" : ""}`}
                     style={{
                       left: pct(j.inicio),
                       width: `calc(${pct(j.fim)} - ${pct(j.inicio)})`,
@@ -183,6 +200,35 @@ export function NewsBoxes(p: Props) {
                 );
               })}
 
+              {volta && (
+                <div
+                  className={`tl-seg volta${antesDoInicio && noAr === p.caixas ? " live" : ""}`}
+                  style={{
+                    left: pct(0),
+                    width: pct(p.inicio),
+                    ["--c" as string]: CORES_CAIXA[p.caixas - 1],
+                  }}
+                  title={`Antes do pack 1 segue o pack ${p.caixas}, da noite anterior`}
+                >
+                  <span className="tl-seg-lbl">
+                    ↺ {p.caixas}
+                    <em>{rotuloHora(0)} – {rotuloHora(p.inicio)}</em>
+                  </span>
+                </div>
+              )}
+
+              {p.caixas > 1 && (
+                <div
+                  className="tl-cut tl-ini"
+                  style={{ left: pct(p.inicio) }}
+                  onPointerDown={arrastarCorte(-1)}
+                  title="Arraste para mudar a hora em que o pack 1 entra"
+                >
+                  <span className="tl-cut-knob" />
+                  <span className="tl-cut-lbl">{rotuloHora(p.inicio)}</span>
+                </div>
+              )}
+
               {p.cortes.map((h, i) => (
                 <div
                   key={i}
@@ -196,7 +242,7 @@ export function NewsBoxes(p: Props) {
                 </div>
               ))}
 
-              {hora !== null && hora >= INICIO_DIA && (
+              {hora !== null && (
                 <div className="tl-now" style={{ left: pct(hora) }}>
                   <span className="tl-now-dot" />
                   <span className="tl-now-lbl">
@@ -206,7 +252,7 @@ export function NewsBoxes(p: Props) {
               )}
             </div>
             <div className="tl-ticks">
-              {Array.from({ length: HORAS / 2 + 1 }, (_, k) => INICIO_DIA + k * 2).map((h) => (
+              {Array.from({ length: HORAS / 2 + 1 }, (_, k) => k * 2).map((h) => (
                 <span key={h} style={{ left: pct(h) }}>{rotuloHora(h)}</span>
               ))}
             </div>
@@ -224,7 +270,11 @@ export function NewsBoxes(p: Props) {
               const cheia = livres === 0;
               const repete = ocupadas === 3 && p.vagas === 4;
               const estado =
-                noAr === c ? "live" : caixaDaHora !== null && c < caixaDaHora ? "passou" : "vem";
+                noAr === c
+                  ? "live"
+                  : !antesDoInicio && caixaDaHora !== null && c < caixaDaHora
+                    ? "passou"
+                    : "vem";
               return (
                 <div
                   key={c}
@@ -242,7 +292,10 @@ export function NewsBoxes(p: Props) {
                     <span className="bx-num">{c}</span>
                     <div className="bx-tit">
                       <strong>Pack {c}</strong>
-                      <span>{rotuloHora(j.inicio)} → {rotuloHora(j.fim)}</span>
+                      <span>
+                        {rotuloHora(j.inicio)} → {rotuloHora(j.fim)}
+                        {volta && c === p.caixas && <> · {rotuloHora(0)} → {rotuloHora(p.inicio)}</>}
+                      </span>
                     </div>
                     <span className={`bx-badge ${estado}`}>
                       {estado === "live" ? <><i /> No ar</> : estado === "passou" ? "Encerrada" : "A seguir"}
@@ -352,6 +405,7 @@ export function NewsBoxes(p: Props) {
             Dentro do pack as notícias revezam <b>uma por exibição</b>, 10 s cada. Na hora da troca
             o sistema passa o próximo pack para o Kuma, que leva à tela na virada da faixa de
             programação dele.
+            {volta && <> Antes das {rotuloHora(p.inicio)} segue no ar o pack {p.caixas}, o último do dia.</>}
             {parados.length > 0 && (
               <span className="boxes-parados">
                 {" "}⚠ {parados.length} envio{parados.length === 1 ? "" : "s"} parado{parados.length === 1 ? "" : "s"}:{" "}
