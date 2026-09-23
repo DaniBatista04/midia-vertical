@@ -10,6 +10,16 @@
  * `unit/create` tem um campo `ignoreLock: boolean` sem descrição nenhuma. Este
  * teste responde se uma unidade criada com ele vai à tela sem o ciclo manual.
  *
+ * ## O plano é uma "caixa" de amanhã
+ *
+ * `campaign/create` é recusado para a nossa conta ("-5 This campaign does not
+ * support audit operations", 23/09/2026), então o plano do teste nasce pelo
+ * único caminho que funciona, o `createOrder` — que cria plano e unidade juntos.
+ * Essa primeira unidade vai para **amanhã**, nas mesmas telas: ela só existe
+ * para o plano existir. A unidade com `ignoreLock` entra nele para **hoje**, e
+ * como a de amanhã ainda não vale, hoje só ela pode levar a notícia à tela. O
+ * cancelamento do teste derruba as duas.
+ *
  * ## Por que um plano novo, e não uma unidade no plano do dia
  *
  * A estratégia amarra o criativo no **plano** (`orderId` é o `adCampaignId`,
@@ -25,15 +35,14 @@
 
 import {
   cancelAdUnit,
+  cancelOrder,
   createAdUnit,
-  createCampaign,
+  createOrder,
   createOrderStrategy,
   getAdUnit,
-  getCampaign,
   getCampaignUnits,
   getValidLocations,
   inquireAdUnit,
-  KUMA_PRODUCT,
   kumaConfig,
   type KumaConfig,
 } from "./client";
@@ -108,10 +117,8 @@ export async function abrirTeste(
     return falhar("referência", "o dia não tem plano de notícia para copiar conta, cidade e frequência");
   }
 
-  let campanha: Corpo;
   let unidades: Corpo[];
   try {
-    campanha = await getCampaign(plano.unidadeId, cfg);
     unidades = await getCampaignUnits(plano.unidadeId, cfg);
   } catch (e) {
     return falhar("referência", e);
@@ -172,24 +179,24 @@ export async function abrirTeste(
     telas = teste.pontos;
   }
 
-  /* ── 1. Plano próprio ───────────────────────────────────────── */
+  /* ── 1. Plano próprio: a "caixa" de amanhã ──────────────────── */
   if (!teste.planoId) {
-    const pedido = {
-      accountId: campanha.accountId,
-      adCampaignName: `TESTE ignoreLock ${hoje} ${teste.predioNome}`.slice(0, 80),
-      adCampaignType: campanha.adCampaignType ?? "VACANT",
-      productName: KUMA_PRODUCT,
-      referId: campanha.referId,
-      note: `Teste do ignoreLock pelo painel midia-vertical — envio ${estado.id}`,
-    };
+    const amanha = dataEmSaoPaulo(1);
     try {
-      const r = await createCampaign(pedido, cfg);
-      const id = r.adCampaignId ? String(r.adCampaignId) : "";
-      if (!id) return falhar("campaign/create", `sem adCampaignId na resposta: ${curto(r)}`);
+      const id = await createOrder(
+        {
+          itens: [{ cityId: cidade, targetIds: telas, goalLocationNum: telas.length }],
+          startDate: amanha,
+          endDate: amanha,
+          durationInSecond: duracao,
+          frequency: frequencia,
+        },
+        cfg,
+      );
       teste.planoId = id;
-      await anotar("campaign/create", true, `plano ${id} · pedido ${curto(pedido)}`);
+      await anotar("createOrder (caixa)", true, `plano ${id} · unidade de ${amanha} em ${telas.join(", ")}`);
     } catch (e) {
-      return falhar("campaign/create", e);
+      return falhar("createOrder (caixa)", e);
     }
   }
 
@@ -287,7 +294,7 @@ export async function retomarTeste(id: string): Promise<EstadoNoticia> {
   return novo;
 }
 
-/** Cancela a unidade do teste. O plano fica, vazio, como os de clima cancelados. */
+/** Cancela o teste: a unidade com `ignoreLock` e o plano-caixa com a unidade de amanhã. */
 export async function cancelarTeste(id: string, opts: { cfg?: KumaConfig } = {}): Promise<EstadoNoticia> {
   const estado = await lerJson<EstadoNoticia>(caminhoNoticia(id));
   if (!estado?.teste) throw new Error(`envio ${id} não é um teste`);
@@ -300,13 +307,25 @@ export async function cancelarTeste(id: string, opts: { cfg?: KumaConfig } = {})
     await gravar(novo);
     return novo;
   }
+  const cfg = cfgDaNoticia(opts.cfg);
+  let ok = true;
   try {
-    const r = await cancelAdUnit(teste.adUnitId, cfgDaNoticia(opts.cfg));
-    teste.canceladoEm = em;
+    const r = await cancelAdUnit(teste.adUnitId, cfg);
     teste.log.push({ em, passo: "unit/cancel", ok: true, detalhe: curto(r) });
   } catch (e) {
+    ok = false;
     teste.log.push({ em, passo: "unit/cancel", ok: false, detalhe: msg(e) });
   }
+  if (teste.planoId) {
+    try {
+      await cancelOrder(teste.planoId, cfg);
+      teste.log.push({ em, passo: "cancelOrder (caixa)", ok: true, detalhe: `plano ${teste.planoId}` });
+    } catch (e) {
+      ok = false;
+      teste.log.push({ em, passo: "cancelOrder (caixa)", ok: false, detalhe: msg(e) });
+    }
+  }
+  if (ok) teste.canceladoEm = em;
   const novo = { ...estado, teste };
   await gravar(novo);
   return novo;
