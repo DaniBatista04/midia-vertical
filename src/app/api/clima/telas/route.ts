@@ -5,6 +5,8 @@ import { cidadesConfiguradas, resolverCidade, siglaCidade } from "@/lib/kuma/cid
 import {
   descreverAuditoria,
   getBuildings,
+  getCampaign,
+  getCampaignUnits,
   getCreativeGroup,
   getOrderDetail,
   getValidLocations,
@@ -46,6 +48,8 @@ export const maxDuration = 300;
  *   /api/clima/telas?data=2026-09-07          outro dia
  *   /api/clima/telas?predio=amelia            detalhe dos prédios que casam
  *   /api/clima/telas?unidade=101147_57932     unidade explícita, sem registro
+ *   /api/clima/telas?cru=1                    o plano, as unidades e o grupo como
+ *                                             o Kuma devolve, sem o catálogo
  *
  * O filtro de prédio ignora acento e caixa, porque o nome chega escrito de
  * formas diferentes ("PACO DE HYGIENOPOLIS" no WhatsApp, "Paço de Hygienópolis"
@@ -141,6 +145,34 @@ export async function GET(req: NextRequest) {
       : null;
 
     const pedido = await getOrderDetail(unidadeId, cfg);
+
+    /*
+     * O que o Kuma guardou, sem interpretação. Existe para a pergunta que o
+     * resumo não responde — quanto tempo de tela o clima ocupa — porque o
+     * portal mostra um número e a gente submete outro, e só lendo o que voltou
+     * dá para saber de qual campo o do portal sai. As listas de tela saem de
+     * fora: são dez mil ids e não dizem nada sobre duração.
+     */
+    if (params.get("cru")) {
+      const semTelas = (o: unknown): unknown =>
+        JSON.parse(
+          JSON.stringify(o, (k, v) =>
+            Array.isArray(v) && /Ids$/.test(k) ? `[${v.length} ids]` : v,
+          ),
+        );
+      const [plano, unidades] = await Promise.all([
+        getCampaign(unidadeId, cfg).catch((e) => ({ erro: String(e) })),
+        getCampaignUnits(unidadeId, cfg).catch((e) => ({ erro: String(e) })),
+      ]);
+      return Response.json({
+        ok: true,
+        data,
+        pedido: semTelas(pedido),
+        plano: semTelas(plano),
+        unidades: semTelas(unidades),
+        grupo: auditoria,
+      });
+    }
     /*
      * `reservedLocationIds` é o que a unidade travou de fato e é a resposta
      * certa enquanto ela está no ar. Só que o Kuma **esvazia essa lista quando
@@ -222,6 +254,8 @@ export async function GET(req: NextRequest) {
         id: unidadeId,
         situacao: pedido.orderStatus,
         periodo: `${pedido.startDate} → ${pedido.endDate}`,
+        duracao: pedido.durationInSecond,
+        frequencia: pedido.frequency,
         travadas: naUnidade.size,
         fonte,
       },
