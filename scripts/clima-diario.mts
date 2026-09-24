@@ -269,8 +269,20 @@ async function renderizarComEspera(cookie: string): Promise<ResultadoClima> {
  *  2. **Container.** O MP4 do `mp4-muxer` carrega metadados próprios; passar
  *     por ffmpeg entrega o mesmo tipo de arquivo que a integração do Mural
  *     produz e que já foi aprovado milhares de vezes.
+ *
+ * A duração sai cortada na exata do material. Sem o corte, os 250 quadros do
+ * browser a 25 fps viram 242 a 24 fps — 10,08s num material de 10s. Foi assim
+ * em todo dia desde 18/08/2026, e em 24/09 a Brato apontou o clima ocupando
+ * dois espaços, 20s, com o plano e o grupo marcando 10s na API: o arquivo era
+ * a única coisa medida acima de 10. O Mural corta do mesmo jeito (`-t 10` no
+ * `resizeVideo`) e tolera só 50ms de sobra.
  */
-async function normalizar(entrada: Uint8Array, w: number, h: number): Promise<Uint8Array> {
+async function normalizar(
+  entrada: Uint8Array,
+  w: number,
+  h: number,
+  duracao: number,
+): Promise<Uint8Array> {
   if (!ffmpegPath) throw new Error("ffmpeg-static não disponível");
   const dir = await mkdtemp(join(tmpdir(), "clima-"));
   const src = join(dir, "in.mp4");
@@ -285,6 +297,7 @@ async function normalizar(entrada: Uint8Array, w: number, h: number): Promise<Ui
         // aprovado em produção carrega áudio.
         "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
         "-shortest",
+        "-t", String(duracao),
         // Daqui para baixo é a receita do `resizeVideo` do Mural, que produz os
         // arquivos que a auditoria aprova: aspecto explícito, libx264 em
         // ultrafast, sem bitrate fixo. Metadado do `mp4-muxer` é descartado.
@@ -320,7 +333,7 @@ async function hospedar(resultado: ResultadoClima, data: Date, indice: number): 
     let buffer: Uint8Array = Buffer.from(f.base64, "base64");
     if (!CRU) {
       const antes = buffer.byteLength;
-      buffer = await normalizar(buffer, f.w, f.h);
+      buffer = await normalizar(buffer, f.w, f.h, DURACAO);
       log(`normalizado ${tamanho}" — ${(antes / 1024 / 1024).toFixed(2)} → ${(buffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
     }
     // O nome já carrega data e índice, então a URL é previsível e não colide
