@@ -44,7 +44,8 @@ import { gruposParaEstrategia, slotsDaFrequencia } from "./noticiaPlano";
 export const MAX_CAIXAS = 12;
 
 /**
- * Onde o dia começa e termina para a divisão das janelas, em horas cheias.
+ * Onde o dia começa e termina para a divisão das janelas. O padrão é em hora
+ * cheia, mas o operador acerta início e trocas no minuto.
  *
  * As notícias passam antes e depois do horário comercial, então a divisão não
  * pode ser a das faixas de comunicado (10h–18h). Dividir a partir da meia-noite
@@ -103,7 +104,10 @@ export function vagasDaCaixa(
  */
 export type GradeNoticias = {
   data: string;
-  /** Hora em que cada caixa seguinte entra no ar. `[16]` = duas caixas, troca às 16h. */
+  /**
+   * Hora em que cada caixa seguinte entra no ar, fracionária e no minuto.
+   * `[16]` = duas caixas, troca às 16h; `[16.5]`, às 16h30.
+   */
   cortes: number[];
   /**
    * Hora em que a caixa 1 entra no ar; antes dela fica a última. Ausente nas
@@ -124,9 +128,28 @@ export function caminhoGrade(dataISO: string): string {
   return `${PREFIXO_GRADES}/${dataISO}.json`;
 }
 
-/** O início serve? Hora inteira, com pelo menos uma hora de janela até o fim do dia. */
+/**
+ * Horários da grade andam de minuto em minuto, guardados em hora fracionária
+ * (14h37 = 14 + 37/60). A conta em minutos inteiros evita que o arredondamento
+ * do ponto flutuante faça 14h37 valer 14h36 numa comparação.
+ */
+export function emMinutos(h: number): number {
+  return Math.round(h * 60);
+}
+
+/** A hora levada ao minuto mais próximo: `14.6211` → 14h37. */
+export function noMinuto(h: number): number {
+  return emMinutos(h) / 60;
+}
+
+/** A hora cai num minuto exato? */
+function ehMinuto(h: unknown): h is number {
+  return typeof h === "number" && Number.isFinite(h) && Math.abs(h * 60 - emMinutos(h)) < 1e-6;
+}
+
+/** O início serve? Um minuto do dia, com pelo menos um minuto de janela até o fim. */
 export function inicioValido(inicio: unknown): inicio is number {
-  return Number.isInteger(inicio) && (inicio as number) >= 0 && (inicio as number) <= FIM_DIA - 1;
+  return ehMinuto(inicio) && emMinutos(inicio) >= 0 && emMinutos(inicio) < emMinutos(FIM_DIA);
 }
 
 /** A hora em que a caixa 1 entra num dia: a da grade, se servir, e senão `INICIO_DIA`. */
@@ -155,15 +178,15 @@ export function cortesPadrao(n: number, inicio: number = INICIO_DIA): number[] {
   return Array.from({ length: caixas - 1 }, (_, k) => Math.round(inicio + passo * (k + 1)));
 }
 
-/** Os cortes servem para `n` caixas? Horas inteiras, crescentes, depois do início. */
+/** Os cortes servem para `n` caixas? Minutos exatos, crescentes, depois do início. */
 export function cortesValidos(cortes: unknown, n: number, inicio: number = INICIO_DIA): cortes is number[] {
   if (!Array.isArray(cortes) || cortes.length !== n - 1) return false;
   return cortes.every(
     (h, i) =>
-      Number.isInteger(h) &&
-      h > inicio &&
-      h < FIM_DIA &&
-      (i === 0 || h > cortes[i - 1]),
+      ehMinuto(h) &&
+      emMinutos(h) > emMinutos(inicio) &&
+      emMinutos(h) < emMinutos(FIM_DIA) &&
+      (i === 0 || emMinutos(h) > emMinutos(cortes[i - 1])),
   );
 }
 
@@ -218,7 +241,9 @@ export function ajustarCortes(cortes: number[], n: number, inicio: number = INIC
  */
 export function cortesDeDuasHoras(inicio: number = INICIO_DIA): number[] {
   const cortes: number[] = [];
-  for (let h = inicio + 2; h < FIM_DIA && cortes.length < MAX_CAIXAS - 1; h += 2) cortes.push(h);
+  for (let h = inicio + 2; emMinutos(h) < emMinutos(FIM_DIA) && cortes.length < MAX_CAIXAS - 1; h += 2) {
+    cortes.push(noMinuto(h));
+  }
   return cortes;
 }
 
@@ -227,8 +252,9 @@ export function cortesDeDuasHoras(inicio: number = INICIO_DIA): number[] {
  * início é a última, que vem da noite anterior dando a volta no relógio.
  */
 export function caixaDaHora(cortes: number[], hora: number, inicio: number = INICIO_DIA): number {
-  if (hora < inicio) return cortes.length + 1;
-  return cortes.filter((c) => hora >= c).length + 1;
+  const m = emMinutos(hora);
+  if (m < emMinutos(inicio)) return cortes.length + 1;
+  return cortes.filter((c) => m >= emMinutos(c)).length + 1;
 }
 
 /** Hora do dia em São Paulo, fracionária (14h30 = 14.5). */
@@ -307,7 +333,25 @@ export function estrategiaDaHora(
   };
 }
 
-/** `16` → `"16h"`; `24` → `"24h"`. */
+/** `16` → `"16h"`; `16.5` → `"16h30"`; `24` → `"24h"`. */
 export function rotuloHora(h: number): string {
-  return `${String(h).padStart(2, "0")}h`;
+  const m = emMinutos(h);
+  const min = m % 60;
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}h${min ? String(min).padStart(2, "0") : ""}`;
+}
+
+/** `16.5` → `"16:30"`, o formato do `<input type="time">`. */
+export function horaParaCampo(h: number): string {
+  const m = emMinutos(h);
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+
+/** `"16:30"` → `16.5`; `null` se o texto não for um horário. */
+export function campoParaHora(v: string): number | null {
+  const r = /^(\d{1,2}):(\d{2})/.exec(v);
+  if (!r) return null;
+  const h = Number(r[1]);
+  const m = Number(r[2]);
+  if (h > 23 || m > 59) return null;
+  return (h * 60 + m) / 60;
 }

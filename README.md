@@ -127,9 +127,9 @@ vai das 6h à meia-noite, com os cortes padrão em hora par. Mais caixas não
 ocupam mais tela: a unidade é a mesma, e a caixa é só a lista da estratégia. A **Programação do dia**, embaixo dos
 previews, mostra a linha do tempo e as caixas: marcar notícia na fila enche a
 primeira caixa com vaga (e abre a seguinte), dá para arrastar notícia entre
-caixas e arrastar o divisor para mudar o horário da troca, de hora em hora
-(em hora ímpar a troca chega à tela na virada seguinte da faixa do Kuma, que
-vira em hora par). O início do pack 1 também se arrasta (padrão 6h): antes dele fica no ar o **último** pack do dia,
+caixas e arrastar o divisor para mudar o horário da troca, de minuto em minuto
+(com o divisor selecionado, as setas andam um minuto e Shift+seta quinze;
+clicar no horário deixa digitar). O início do pack 1 também se arrasta (padrão 6h): antes dele fica no ar o **último** pack do dia,
 dando a volta no relógio — a unidade não tem `hours`, então a madrugada nunca
 fica sem notícia, e segue com o pack da noite até o da manhã entrar.
 

@@ -5,13 +5,22 @@ import {
   useRef,
   useState,
   type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import type { DiaNoticias, EnvioDoDia } from "@/app/api/noticias/dia/route";
 import { proxiedImage } from "@/lib/news/draw";
 import type { NewsItem } from "@/lib/news/spec";
-import { caixaDaHora as caixaPedida, FIM_DIA, rotuloHora } from "@/lib/kuma/noticiaCaixas";
+import {
+  caixaDaHora as caixaPedida,
+  campoParaHora,
+  emMinutos,
+  FIM_DIA,
+  horaParaCampo,
+  noMinuto,
+  rotuloHora,
+} from "@/lib/kuma/noticiaCaixas";
 import type { Salvamento } from "@/components/news/NewsGenerator";
 
 /**
@@ -157,6 +166,10 @@ const pct = (h: number) => `${(Math.min(Math.max(h, 0), FIM_DIA) / HORAS) * 100}
 export function NewsBoxes(p: Props) {
   const [aberto, setAberto] = useState(true);
   const [alvo, setAlvo] = useState<number | null>(null);
+  /** O divisor com o horário aberto para digitar: `-1` é o início do pack 1. */
+  const [editando, setEditando] = useState<number | null>(null);
+  /** Esc fecha o campo sem gravar — e o `blur` da saída não pode gravar. */
+  const descartar = useRef(false);
   const trilho = useRef<HTMLDivElement>(null);
   const [agora, setAgora] = useState(() => Date.now());
   useEffect(() => {
@@ -184,29 +197,37 @@ export function NewsBoxes(p: Props) {
     fim: c === p.caixas ? FIM_DIA : p.cortes[c - 1],
   });
 
-  /* ── Arrastar um divisor: o início do pack 1 (`i = -1`) ou uma troca ── */
+  /*
+   * Mover um divisor — o início do pack 1 (`i = -1`) ou uma troca — para a
+   * hora `h`, levada ao minuto e presa entre os vizinhos, com pelo menos um
+   * minuto de janela para cada pack.
+   */
+  const MINUTO = 1 / 60;
+  const moverCorte = (i: number, h: number) => {
+    const alvoH = noMinuto(h);
+    if (i < 0) {
+      const ini = Math.min(Math.max(alvoH, 0), (p.cortes[0] ?? FIM_DIA) - MINUTO);
+      if (emMinutos(ini) !== emMinutos(p.inicio)) p.onInicio(noMinuto(ini));
+      return;
+    }
+    const min = (i === 0 ? p.inicio : p.cortes[i - 1]) + MINUTO;
+    const max = (i === p.cortes.length - 1 ? FIM_DIA : p.cortes[i + 1]) - MINUTO;
+    const corte = noMinuto(Math.min(Math.max(alvoH, min), max));
+    if (emMinutos(corte) !== emMinutos(p.cortes[i])) p.onCortes(p.cortes.map((c, k) => (k === i ? corte : c)));
+  };
+  const horaDoCorte = (i: number) => (i < 0 ? p.inicio : p.cortes[i]);
+
+  /* ── Arrastar um divisor, de minuto em minuto ─────────────── */
   const arrastarCorte = (i: number) => (ev: ReactPointerEvent<HTMLDivElement>) => {
     ev.preventDefault();
     const el = trilho.current;
     if (!el) return;
     const alvoEl = ev.currentTarget;
+    alvoEl.focus();
     alvoEl.setPointerCapture(ev.pointerId);
     const mover = (e: PointerEvent) => {
       const r = el.getBoundingClientRect();
-      const h = ((e.clientX - r.left) / r.width) * HORAS;
-      // Hora cheia, com pelo menos uma hora de janela. A faixa do Kuma vira
-      // em hora par, então um corte em hora ímpar chega à tela na virada
-      // seguinte — mas a escolha é da operação.
-      let alvoH = Math.round(h);
-      if (i < 0) {
-        alvoH = Math.min(Math.max(alvoH, 0), (p.cortes[0] ?? FIM_DIA) - 1);
-        if (alvoH !== p.inicio) p.onInicio(alvoH);
-        return;
-      }
-      const min = (i === 0 ? p.inicio : p.cortes[i - 1]) + 1;
-      const max = (i === p.cortes.length - 1 ? FIM_DIA : p.cortes[i + 1]) - 1;
-      alvoH = Math.min(Math.max(alvoH, min), max);
-      if (alvoH !== p.cortes[i]) p.onCortes(p.cortes.map((c, k) => (k === i ? alvoH : c)));
+      moverCorte(i, ((e.clientX - r.left) / r.width) * HORAS);
     };
     const soltar = () => {
       alvoEl.removeEventListener("pointermove", mover);
@@ -217,6 +238,55 @@ export function NewsBoxes(p: Props) {
     alvoEl.addEventListener("pointerup", soltar);
     alvoEl.addEventListener("pointercancel", soltar);
   };
+
+  /* No trilho um pixel vale mais de um minuto: o acerto fino é pelas setas
+     (um minuto; com Shift, quinze) ou digitando o horário. */
+  const teclaNoCorte = (i: number) => (ev: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (ev.target !== ev.currentTarget) return;
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      setEditando(i);
+      return;
+    }
+    const passo = ev.key === "ArrowRight" ? 1 : ev.key === "ArrowLeft" ? -1 : 0;
+    if (!passo) return;
+    ev.preventDefault();
+    moverCorte(i, horaDoCorte(i) + passo * (ev.shiftKey ? 15 : 1) * MINUTO);
+  };
+
+  const rotuloDoCorte = (i: number) =>
+    editando === i ? (
+      <input
+        type="time"
+        step={60}
+        className="tl-cut-campo"
+        autoFocus
+        defaultValue={horaParaCampo(horaDoCorte(i))}
+        onPointerDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") {
+            descartar.current = true;
+            e.currentTarget.blur();
+          }
+        }}
+        onBlur={(e) => {
+          const h = campoParaHora(e.currentTarget.value);
+          if (h !== null && !descartar.current) moverCorte(i, h);
+          descartar.current = false;
+          setEditando(null);
+        }}
+      />
+    ) : (
+      <span
+        className="tl-cut-lbl"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={() => setEditando(i)}
+        title="Clique para digitar o horário"
+      >
+        {rotuloHora(horaDoCorte(i))}
+      </span>
+    );
 
   /* ── Drag & drop das notícias pendentes ───────────────────── */
   const aoArrastar = (item: number) => (e: DragEvent) => {
@@ -414,10 +484,18 @@ export function NewsBoxes(p: Props) {
                   className="tl-cut tl-ini"
                   style={{ left: pct(p.inicio) }}
                   onPointerDown={arrastarCorte(-1)}
-                  title="Arraste para mudar a hora em que o pack 1 entra"
+                  onKeyDown={teclaNoCorte(-1)}
+                  tabIndex={0}
+                  role="slider"
+                  aria-label="Início do pack 1"
+                  aria-valuenow={emMinutos(p.inicio)}
+                  aria-valuemin={0}
+                  aria-valuemax={emMinutos(FIM_DIA)}
+                  aria-valuetext={rotuloHora(p.inicio)}
+                  title="Arraste, use as setas (minuto a minuto) ou clique no horário para digitar a hora em que o pack 1 entra"
                 >
                   <span className="tl-cut-knob" />
-                  <span className="tl-cut-lbl">{rotuloHora(p.inicio)}</span>
+                  {rotuloDoCorte(-1)}
                 </div>
               )}
 
@@ -427,10 +505,18 @@ export function NewsBoxes(p: Props) {
                   className="tl-cut"
                   style={{ left: pct(h) }}
                   onPointerDown={arrastarCorte(i)}
-                  title="Arraste para mudar a hora da troca"
+                  onKeyDown={teclaNoCorte(i)}
+                  tabIndex={0}
+                  role="slider"
+                  aria-label={`Troca para o pack ${i + 2}`}
+                  aria-valuenow={emMinutos(h)}
+                  aria-valuemin={0}
+                  aria-valuemax={emMinutos(FIM_DIA)}
+                  aria-valuetext={rotuloHora(h)}
+                  title="Arraste, use as setas (minuto a minuto) ou clique no horário para digitar a hora da troca"
                 >
                   <span className="tl-cut-knob" />
-                  <span className="tl-cut-lbl">{rotuloHora(h)}</span>
+                  {rotuloDoCorte(i)}
                 </div>
               ))}
 
@@ -438,7 +524,7 @@ export function NewsBoxes(p: Props) {
                 <div className="tl-now" style={{ left: pct(hora) }}>
                   <span className="tl-now-dot" />
                   <span className="tl-now-lbl">
-                    agora · {String(Math.floor(hora)).padStart(2, "0")}:{String(Math.round((hora % 1) * 60)).padStart(2, "0")}
+                    agora · {horaParaCampo(hora)}
                   </span>
                 </div>
               )}

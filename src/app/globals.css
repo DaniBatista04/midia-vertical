@@ -1258,6 +1258,34 @@ input[type="range"]::-moz-range-thumb {
   padding: 1px 6px;
   border-radius: 4px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: text;
+}
+.tl-cut:focus-visible {
+  outline: none;
+}
+.tl-cut:focus-visible .tl-cut-knob {
+  transform: scale(1.25);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 0 3px var(--accent);
+}
+.tl-cut:focus-visible .tl-cut-lbl {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.tl-cut-campo {
+  position: absolute;
+  top: -22px;
+  z-index: 5;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  color: #fff;
+  color-scheme: dark;
+  background: #000;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-variant-numeric: tabular-nums;
+  cursor: text;
 }
 .tl-now {
   position: absolute;
