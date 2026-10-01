@@ -426,9 +426,49 @@ export type PassoEstrategia =
       vagas: number;
       caixa: number;
       caixas: number;
+      recuperados?: string[];
     }
-  | { estado: "em-dia"; data: string; noticias: number; caixa: number; caixas: number }
+  | {
+      estado: "em-dia";
+      data: string;
+      noticias: number;
+      caixa: number;
+      caixas: number;
+      recuperados?: string[];
+    }
   | { estado: "sem-estrategia"; data: string; motivo: string };
+
+/**
+ * Os envios do dia que estão na unidade do plano mas cujo grupo sumiu da lista.
+ *
+ * O envio é a fonte da verdade: ele só ganha `unidadeId` depois que o grupo foi
+ * amarrado. Se o plano não tem o grupo, foi o registro do plano que perdeu a
+ * escrita — em 01/10/2026 duas execuções do cron se sobrepuseram amarrando os
+ * dezesseis envios do dia, cada uma regravou o plano a partir da sua leitura, e
+ * cinco grupos sumiram. O Pack 2 foi ao ar com uma notícia em vez de quatro.
+ *
+ * Envio retirado, parado ou de teste não volta: a ausência dele é a certa.
+ */
+function enviosForaDoPlano(plano: PlanoNoticias, envios: EstadoNoticia[]): EstadoNoticia[] {
+  const noPlano = new Set(plano.grupos);
+  return envios.filter(
+    (e) =>
+      !e.teste &&
+      !e.erro &&
+      !e.retiradaEm &&
+      e.grupoId &&
+      e.unidadeId === plano.unidadeId &&
+      !noPlano.has(e.grupoId),
+  );
+}
+
+/** O plano com os grupos perdidos de volta, cada um na caixa do seu envio. */
+function comEnviosDeVolta(plano: PlanoNoticias, perdidos: EstadoNoticia[]): PlanoNoticias {
+  if (!perdidos.length) return plano;
+  const caixaDoGrupo = { ...plano.caixaDoGrupo };
+  for (const e of perdidos) caixaDoGrupo[e.grupoId!] = e.caixa ?? 1;
+  return { ...plano, grupos: [...plano.grupos, ...perdidos.map((e) => e.grupoId!)], caixaDoGrupo };
+}
 
 /**
  * Confere se a estratégia da unidade do dia carrega a caixa da hora.
@@ -440,42 +480,54 @@ export type PassoEstrategia =
  *
  * Na maioria das voltas ela não faz nada: o registro do plano guarda a lista que
  * foi mandada no último `createOrderStrategy`, e quando ela bate com a que o
- * plano pede o custo da volta é a leitura de dois JSON. Além da virada da caixa,
+ * plano pede o custo da volta é a leitura do plano, da grade e dos envios do dia
+ * (que o cron já leu e passa em `envios`). Além da virada da caixa,
  * existe para as situações em que a estratégia fica para trás do plano sem
  * ninguém perceber, porque o Kuma não tem endpoint para ler a estratégia de uma
  * unidade:
  *
- *  - uma volta que morreu entre gravar a lista e mandá-la ao Kuma; e
+ *  - uma volta que morreu entre gravar a lista e mandá-la ao Kuma;
  *  - os planos criados enquanto o rodízio existiu (01 a 03/09/2026), que têm um
  *    grupo só na estratégia e as outras notícias do dia fora do ar. A primeira
  *    volta reescreve a estratégia com todas e o plano entra no regime certo, sem
- *    ninguém precisar reenviar notícia nenhuma.
+ *    ninguém precisar reenviar notícia nenhuma; e
+ *  - um plano que perdeu grupos para duas escritas concorrentes (ver
+ *    `enviosForaDoPlano`). Os grupos voltam à lista a partir dos envios do dia,
+ *    e a estratégia é remontada se a caixa da hora mudou com eles.
+ *
+ * Só os envios com a data do plano são conferidos: uma aprovação que atravessou
+ * a meia-noite entra no plano do dia novo com o envio datado da véspera, e fica
+ * de fora desta recuperação.
  */
 export async function sincronizarEstrategia(
   dataISO: string,
-  opts: { cfg?: KumaConfig; log?: (m: string) => void } = {},
+  opts: { cfg?: KumaConfig; log?: (m: string) => void; envios?: EstadoNoticia[] } = {},
 ): Promise<PassoEstrategia> {
   const log = opts.log ?? (() => {});
-  const plano = await lerJson<PlanoNoticias>(caminhoPlanoNoticias(dataISO));
+  const lido = await lerJson<PlanoNoticias>(caminhoPlanoNoticias(dataISO));
 
-  if (!plano) return { estado: "sem-estrategia", data: dataISO, motivo: "o dia não tem plano" };
-  if (!plano.unidadeId) {
+  if (!lido) return { estado: "sem-estrategia", data: dataISO, motivo: "o dia não tem plano" };
+  if (!lido.unidadeId) {
     return { estado: "sem-estrategia", data: dataISO, motivo: "plano sem unidade ainda" };
   }
-  if (plano.criandoEm && Date.now() - Date.parse(plano.criandoEm) < LEASE_SEGUNDOS * 1_000) {
+  if (lido.criandoEm && Date.now() - Date.parse(lido.criandoEm) < LEASE_SEGUNDOS * 1_000) {
     // Uma notícia está entrando no plano neste instante, e ela também escreve a
     // estratégia. Duas escritas no mesmo minuto deixariam o registro descrevendo
     // uma lista e a unidade tocando outra.
     return { estado: "sem-estrategia", data: dataISO, motivo: "plano em atualização" };
   }
+  const unidadeId = lido.unidadeId;
+
+  let perdidos = enviosForaDoPlano(lido, opts.envios ?? (await enviosDoDia(dataISO)).envios);
+  let plano = comEnviosDeVolta(lido, perdidos);
   if (!plano.grupos.length) {
     return { estado: "sem-estrategia", data: dataISO, motivo: "plano sem grupo criativo" };
   }
 
-  const { estrategia, caixa, caixas } = await estrategiaAgora(plano);
-  const naCaixa = estrategia.filter((g, i) => estrategia.indexOf(g) === i).length;
-  if (mesmaEstrategia(plano.estrategia, estrategia)) {
-    return { estado: "em-dia", data: dataISO, noticias: naCaixa, caixa, caixas };
+  let alvo = await estrategiaAgora(plano);
+  if (!perdidos.length && mesmaEstrategia(plano.estrategia, alvo.estrategia)) {
+    const naCaixa = new Set(alvo.estrategia).size;
+    return { estado: "em-dia", data: dataISO, noticias: naCaixa, caixa: alvo.caixa, caixas: alvo.caixas };
   }
 
   const conta = process.env.KUMA_BIDDER_NEWS?.trim();
@@ -487,13 +539,42 @@ export async function sincronizarEstrategia(
   const cfg = opts.cfg ?? kumaConfig(conta);
 
   const agora = new Date().toISOString();
-  await gravarPlano({ ...plano, criandoEm: agora });
+  await gravarPlano({ ...lido, criandoEm: agora });
+
+  /*
+   * Os envios são relidos com a trava de pé. A retirada marca o envio antes de
+   * ler o plano e recusa quando encontra a trava: ou a marca já está nesta
+   * leitura, ou a retirada vai esbarrar na trava e desfazer a marca. Sem a
+   * releitura, uma notícia tirada do pack entre as duas leituras voltaria ao ar.
+   */
+  if (perdidos.length) {
+    perdidos = enviosForaDoPlano(lido, (await enviosDoDia(dataISO)).envios);
+    plano = comEnviosDeVolta(lido, perdidos);
+    alvo = await estrategiaAgora(plano);
+  }
+  const { estrategia, caixa, caixas } = alvo;
+  const naCaixa = new Set(estrategia).size;
+  const recuperados = perdidos.length ? { recuperados: perdidos.map((e) => e.id) } : {};
+  if (perdidos.length) {
+    log(
+      `plano de ${dataISO}: ${perdidos.length} grupo(s) de volta ao plano — ` +
+        perdidos.map((e) => `${e.id} (pack ${e.caixa ?? 1})`).join(", "),
+    );
+  }
+
+  if (mesmaEstrategia(plano.estrategia, estrategia)) {
+    // Os grupos que voltaram são de packs fora da hora: só o registro muda.
+    await gravarPlano({ ...plano, atualizadoEm: new Date().toISOString(), criandoEm: undefined });
+    return { estado: "em-dia", data: dataISO, noticias: naCaixa, caixa, caixas, ...recuperados };
+  }
+
   try {
-    await createOrderStrategy(plano.unidadeId, estrategia, cfg);
+    await createOrderStrategy(unidadeId, estrategia, cfg);
   } catch (e) {
     // O registro volta a descrever o que está no ar de verdade: a escrita não
-    // aconteceu, então `estrategia` continua sendo a lista anterior. A volta
-    // seguinte do cron tenta de novo.
+    // aconteceu, então `estrategia` continua sendo a lista anterior. Os grupos
+    // recuperados ficam, porque estão amarrados de fato; a volta seguinte do
+    // cron vê a estratégia atrasada e tenta de novo.
     await gravarPlano({ ...plano, criandoEm: undefined }).catch(() => {});
     throw e;
   }
@@ -511,11 +592,12 @@ export async function sincronizarEstrategia(
   return {
     estado: "reescrita",
     data: dataISO,
-    unidadeId: plano.unidadeId,
+    unidadeId,
     noticias: naCaixa,
     vagas: estrategia.length,
     caixa,
     caixas,
+    ...recuperados,
   };
 }
 

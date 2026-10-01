@@ -100,6 +100,19 @@ function basePublica(req: NextRequest): string {
  */
 const DIAS_PARA_TRAS = 3;
 
+/**
+ * Quanto tempo uma execução pode passar avançando envios.
+ *
+ * O cron dispara a cada minuto, e uma execução que passa disso corre junto com
+ * a seguinte. Em 01/10/2026 os dezesseis envios do dia foram aprovados de uma
+ * vez; amarrar cada um leva uns cinco segundos, a execução passou do minuto, e
+ * as duas regravaram o plano do dia cada uma a partir da sua leitura — cinco
+ * grupos sumiram dele, e o Pack 2 foi ao ar com uma notícia em vez de quatro.
+ * Passado o orçamento, os envios que sobraram só são lidos, e andam no minuto
+ * seguinte.
+ */
+const ORCAMENTO_MS = 40_000;
+
 /** Envio que já está no ar, parado ou retirado não precisa de mais nenhuma volta. */
 function terminado(e: EstadoNoticia): boolean {
   return Boolean(e.unidadeId) || Boolean(e.erro) || Boolean(e.retiradaEm);
@@ -129,14 +142,20 @@ export async function GET(req: NextRequest) {
     return Response.json({ ok: false, error: msg }, { status: 500 });
   }
 
+  const inicio = Date.now();
   const passos: PassoNoticia[] = [];
   const falhas: { id: string; erro: string }[] = [];
   const vistos = new Set<string>();
+  let adiados = 0;
 
   for (const caminho of caminhos) {
     const estado = await lerJson<EstadoNoticia>(caminho);
     if (estado) vistos.add(estado.id);
     if (!estado || terminado(estado)) continue;
+    if (Date.now() - inicio > ORCAMENTO_MS) {
+      adiados++;
+      continue;
+    }
     try {
       const passo = await avancarNoticia(estado, { baseUrl, log });
       passos.push(passo);
@@ -159,8 +178,11 @@ export async function GET(req: NextRequest) {
    * que passou da hora de ir para a análise sem grupo criativo, vira falha — a
    * resposta passa a 500 e o log mostra o id, em vez de parecer sucesso.
    */
+  if (adiados) log(`${adiados} envio(s) ficam para o minuto seguinte — orçamento da execução esgotado`);
+
+  let deHoje: EstadoNoticia[] | undefined;
   try {
-    const { envios: deHoje } = await enviosDoDia(dataEmSaoPaulo(0));
+    ({ envios: deHoje } = await enviosDoDia(dataEmSaoPaulo(0)));
     const comFalha = new Set(falhas.map((f) => f.id));
     for (const e of deHoje) {
       if (terminado(e) || comFalha.has(e.id)) continue;
@@ -198,7 +220,7 @@ export async function GET(req: NextRequest) {
    */
   let estrategia: PassoEstrategia | null = null;
   try {
-    estrategia = await sincronizarEstrategia(dataEmSaoPaulo(0), { log });
+    estrategia = await sincronizarEstrategia(dataEmSaoPaulo(0), { log, envios: deHoje });
   } catch (e) {
     const erro = e instanceof Error ? e.message : String(e);
     console.error(`[noticia/${origem}] estratégia falhou: ${erro}`);
@@ -208,6 +230,7 @@ export async function GET(req: NextRequest) {
   const corpo = {
     ok: falhas.length === 0,
     abertos: passos.length,
+    ...(adiados ? { adiados } : {}),
     passos,
     ...(estrategia ? { estrategia } : {}),
     ...(falhas.length ? { falhas } : {}),
