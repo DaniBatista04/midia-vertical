@@ -16,7 +16,7 @@ import {
 } from "@/lib/kuma/noticiaCaixas";
 import { caminhoPlanoNoticias, frequenciaDaNoticia, type PlanoNoticias } from "@/lib/kuma/noticiaPlano";
 import type { TesteIgnoreLock } from "@/lib/kuma/noticiaEstado";
-import { enviosDoDia, GRACA_SEGUNDOS } from "@/lib/kuma/publicarNoticia";
+import { envioAtrasado, enviosDoDia, GRACA_SEGUNDOS } from "@/lib/kuma/publicarNoticia";
 import { lerJson, uploadPublico } from "@/lib/server/supabaseUpload";
 
 export const runtime = "nodejs";
@@ -48,6 +48,11 @@ export type EnvioDoDia = {
    * passada a folga de propagação. É o "falta quanto?" do painel.
    */
   submeteEm?: string;
+  /**
+   * Passou da hora de ir para a análise e o grupo criativo não foi submetido:
+   * não é mais fila, é o sistema parado. O painel mostra em vermelho.
+   */
+  atrasada?: boolean;
   /** Quando a notícia entrou na etapa em que está. */
   desde?: string;
 };
@@ -162,6 +167,7 @@ export async function GET(req: NextRequest) {
         ...(!e.grupoId && !e.erro && !e.retiradaEm
           ? { submeteEm: new Date(Date.parse(e.hospedadoEm) + GRACA_SEGUNDOS * 1_000).toISOString() }
           : {}),
+        ...(envioAtrasado(e) ? { atrasada: true } : {}),
         desde: e.retiradaEm ?? e.agendadoEm ?? e.submetidoEm ?? e.hospedadoEm,
       })),
     };

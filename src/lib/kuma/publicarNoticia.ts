@@ -75,6 +75,24 @@ import { apagar, lerJson, uploadPublico } from "../server/supabaseUpload";
  */
 export const GRACA_SEGUNDOS = 600;
 
+/**
+ * Quanto tempo depois da hora de ir para a análise um envio ainda sem grupo
+ * criativo passa a ser alarme.
+ *
+ * O cron submete no primeiro minuto depois da folga; dez minutos de atraso já
+ * não são fila, são o cron sem enxergar o envio. Foi o que aconteceu em
+ * 01/10/2026: a varredura deixou os envios do dia de fora, respondeu 200 a manhã
+ * inteira, e o painel mostrava "indo para a análise" como se estivesse tudo
+ * andando.
+ */
+export const ATRASO_SEGUNDOS = 600;
+
+/** O envio passou da hora de ir para a análise e o grupo criativo não foi submetido. */
+export function envioAtrasado(e: EstadoNoticia, agora = Date.now()): boolean {
+  if (e.grupoId || e.erro || e.retiradaEm) return false;
+  return agora > Date.parse(e.hospedadoEm) + (GRACA_SEGUNDOS + ATRASO_SEGUNDOS) * 1_000;
+}
+
 export type PassoNoticia =
   | { estado: "aguardando-propagacao"; id: string; faltamSegundos: number }
   | { estado: "submetido"; id: string; grupoId: string }

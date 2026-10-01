@@ -1687,6 +1687,15 @@ input[type="range"]::-moz-range-thumb {
 }
 .etapa-chip.sub { color: var(--blue); }
 .etapa-chip.ok { color: #4cff91; }
+.etapa-chip.err {
+  color: var(--red);
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 40%, transparent);
+}
+.etapa-chip.err i { animation: pulso-etapa 1.4s ease-in-out infinite; }
 .etapa-chip.apr {
   color: var(--warn);
   font-weight: 700;

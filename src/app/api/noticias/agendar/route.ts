@@ -4,8 +4,11 @@ import type { NextRequest } from "next/server";
 
 import { dataEmSaoPaulo } from "@/lib/kuma/agendar";
 import {
+  ATRASO_SEGUNDOS,
   avancarNoticia,
   descreverPasso,
+  envioAtrasado,
+  enviosDoDia,
   sincronizarEstrategia,
   type PassoEstrategia,
   type PassoNoticia,
@@ -128,9 +131,11 @@ export async function GET(req: NextRequest) {
 
   const passos: PassoNoticia[] = [];
   const falhas: { id: string; erro: string }[] = [];
+  const vistos = new Set<string>();
 
   for (const caminho of caminhos) {
     const estado = await lerJson<EstadoNoticia>(caminho);
+    if (estado) vistos.add(estado.id);
     if (!estado || terminado(estado)) continue;
     try {
       const passo = await avancarNoticia(estado, { baseUrl, log });
@@ -142,6 +147,39 @@ export async function GET(req: NextRequest) {
       console.error(`[noticia/${origem}] ${estado.id} falhou: ${erro}`);
       falhas.push({ id: estado.id, erro });
     }
+  }
+
+  /*
+   * A conferência: os envios de hoje, lidos pelo id como o painel lê, contra o
+   * que a varredura enxergou.
+   *
+   * Existe porque a varredura falhou calada uma vez: em 01/10/2026 a listagem
+   * cortava em 200 nomes, os envios do dia ficaram de fora, e o cron respondeu
+   * 200 a manhã inteira sem fazer nada. Envio aberto que a varredura não viu, ou
+   * que passou da hora de ir para a análise sem grupo criativo, vira falha — a
+   * resposta passa a 500 e o log mostra o id, em vez de parecer sucesso.
+   */
+  try {
+    const { envios: deHoje } = await enviosDoDia(dataEmSaoPaulo(0));
+    const comFalha = new Set(falhas.map((f) => f.id));
+    for (const e of deHoje) {
+      if (terminado(e) || comFalha.has(e.id)) continue;
+      let erro: string | null = null;
+      if (!vistos.has(e.id)) {
+        erro = "envio aberto de hoje ficou fora da varredura do cron";
+      } else if (envioAtrasado(e)) {
+        erro =
+          `grupo criativo não submetido ${ATRASO_SEGUNDOS / 60} min depois da hora ` +
+          "de ir para a análise";
+      }
+      if (!erro) continue;
+      console.error(`[noticia/${origem}] ${e.id}: ${erro}`);
+      falhas.push({ id: e.id, erro });
+    }
+  } catch (e) {
+    const erro = e instanceof Error ? e.message : String(e);
+    console.error(`[noticia/${origem}] conferência dos envios de hoje falhou: ${erro}`);
+    falhas.push({ id: `conferencia ${dataEmSaoPaulo(0)}`, erro });
   }
 
   /*

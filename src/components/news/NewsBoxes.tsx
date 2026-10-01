@@ -98,6 +98,17 @@ function seloDoEnvio(
 ): Selo {
   switch (e.etapa) {
     case "propagando": {
+      if (e.atrasada) {
+        return {
+          rotulo: "Atrasada",
+          detalhe: "o sistema não enviou",
+          classe: "err",
+          dica:
+            "Passou da hora de ir para a Análise Criativa e o grupo criativo não foi submetido. " +
+            "Não é fila: o envio automático parou. Avise quem cuida do sistema.",
+          passo: 1,
+        };
+      }
       const faltam = e.submeteEm ? Math.ceil((Date.parse(e.submeteEm) - agora) / 60_000) : null;
       return {
         rotulo: "Subindo",
@@ -180,7 +191,8 @@ export function NewsBoxes(p: Props) {
   const enviados = (p.dia?.envios ?? []).filter((e) => e.etapa !== "parado" && e.etapa !== "retirada");
   const retiradas = (p.dia?.envios ?? []).filter((e) => e.etapa === "retirada");
   const parados = (p.dia?.envios ?? []).filter((e) => e.etapa === "parado");
-  const subindo = enviados.filter((e) => e.etapa === "propagando").length;
+  const atrasadas = enviados.filter((e) => e.etapa === "propagando" && e.atrasada).length;
+  const subindo = enviados.filter((e) => e.etapa === "propagando" && !e.atrasada).length;
   const aprovar = enviados.filter((e) => e.etapa === "em-aprovacao").length;
   const aprovadas = enviados.filter((e) => e.etapa === "no-plano").length;
   const pendentes = [...p.alocacao.entries()];
@@ -337,6 +349,11 @@ export function NewsBoxes(p: Props) {
           </div>
         ) : (
         <div className="boxes-resumo">
+          {atrasadas > 0 && (
+            <span className="etapa-chip err" title="Passaram da hora de ir para a Análise Criativa sem o sistema enviar">
+              <i /> {atrasadas} atrasada{atrasadas === 1 ? "" : "s"}
+            </span>
+          )}
           {subindo > 0 && (
             <span className="etapa-chip sub" title="Material propagando; vai para a Análise Criativa em ~10 min">
               <i /> {subindo} subindo
