@@ -86,6 +86,17 @@ function basePublica(req: NextRequest): string {
   return daRequisicao;
 }
 
+/**
+ * Quantos dias para trás a varredura olha.
+ *
+ * O id do envio começa pela data, então dá para listar só o que pode estar
+ * aberto: hoje, os dias agendados à frente e uma folga para trás, para uma
+ * aprovação que atravessou a meia-noite ou um fim de semana. Envio mais velho
+ * que isso e ainda aberto não anda mais sozinho — e reler a pasta inteira a cada
+ * minuto custava centenas de leituras e já dava 504 no Storage.
+ */
+const DIAS_PARA_TRAS = 3;
+
 /** Envio que já está no ar, parado ou retirado não precisa de mais nenhuma volta. */
 function terminado(e: EstadoNoticia): boolean {
   return Boolean(e.unidadeId) || Boolean(e.erro) || Boolean(e.retiradaEm);
@@ -108,7 +119,7 @@ export async function GET(req: NextRequest) {
 
   let caminhos: string[];
   try {
-    caminhos = await listar(PREFIXO_NOTICIAS);
+    caminhos = await listar(PREFIXO_NOTICIAS, dataEmSaoPaulo(-DIAS_PARA_TRAS));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`[noticia/${origem}] falha ao listar envios: ${msg}`);

@@ -92,33 +92,53 @@ export function urlPublica(caminho: string): string {
  * duplicada a cada execução, travando inventário de novo e de novo.
  */
 /**
- * Lista os objetos sob um prefixo.
+ * Lista os objetos sob um prefixo, do nome mais novo para o mais velho.
  *
  * O projeto não tem banco, então o prefixo dos registros é a fila de trabalho:
  * é assim que o cron descobre quais envios de notícia existem e em que ponto
  * cada um parou. Devolve só os nomes, já com o prefixo na frente, porque é isso
  * que `lerJson` espera receber.
+ *
+ * `desde` é o menor nome que interessa (`2026-09-28` pega `2026-09-28-01.json`
+ * em diante). A listagem anda em páginas, em ordem decrescente, e para assim
+ * que uma página passa do corte. Antes ela era uma página só, de 200, em ordem
+ * crescente: quando a pasta passou de 200 envios, a página trazia só os mais
+ * antigos, todos encerrados, e os de 01/10/2026 ficaram o dia inteiro sem
+ * ninguém submeter — o painel, que lê pelo id, mostrava os doze "subindo".
  */
-export async function listar(prefixo: string, limite = 200): Promise<string[]> {
+export async function listar(prefixo: string, desde = ""): Promise<string[]> {
   const { url, key, bucket } = supabaseConfig();
-  const res = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-      "Cache-Control": "no-cache",
-    },
-    body: JSON.stringify({ prefix: prefixo, limit: limite, sortBy: { column: "name", order: "asc" } }),
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error(`falha ao listar ${prefixo} (HTTP ${res.status})`);
-  const itens = (await res.json()) as { name?: string }[];
-  return itens
-    .map((i) => i.name)
-    .filter((n): n is string => Boolean(n))
-    // A listagem devolve também as "pastas", que vêm sem extensão.
-    .filter((n) => n.endsWith(".json"))
-    .map((n) => `${prefixo}/${n}`);
+  const pagina = 100;
+  const nomes: string[] = [];
+  for (let offset = 0; ; offset += pagina) {
+    const res = await fetch(`${url}/storage/v1/object/list/${bucket}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+      },
+      body: JSON.stringify({
+        prefix: prefixo,
+        limit: pagina,
+        offset,
+        sortBy: { column: "name", order: "desc" },
+      }),
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`falha ao listar ${prefixo} (HTTP ${res.status})`);
+    const itens = ((await res.json()) as { name?: string }[])
+      .map((i) => i.name)
+      .filter((n): n is string => Boolean(n));
+    nomes.push(...itens.filter((n) => n >= desde));
+    if (itens.length < pagina || itens.some((n) => n < desde)) break;
+  }
+  return (
+    nomes
+      // A listagem devolve também as "pastas", que vêm sem extensão.
+      .filter((n) => n.endsWith(".json"))
+      .map((n) => `${prefixo}/${n}`)
+  );
 }
 
 /**
