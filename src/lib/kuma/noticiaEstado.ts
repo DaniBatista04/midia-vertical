@@ -42,6 +42,13 @@ export type EstadoNoticia = {
   agendadoEm?: string;
   telas?: number;
 
+  /**
+   * Última vez que o Kuma recusou a amarração com o portal travado (City Lock).
+   * Sai quando a notícia entra no plano. É o que o painel mostra como "esperando
+   * destravar" em vez de "Aprovar".
+   */
+  portalTravadoEm?: string;
+
   /** Trava contra duas execuções criando a mesma unidade. Ver `estado.ts`. */
   criandoEm?: string;
   recriacoes?: number;

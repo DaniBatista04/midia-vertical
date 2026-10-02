@@ -99,7 +99,15 @@ export type PassoNoticia =
   | { estado: "aguardando-aprovacao"; id: string; grupoId: string; auditoria: string }
   | { estado: "no-ar"; id: string; unidadeId: string; telas: number }
   | { estado: "ja-no-ar"; id: string; unidadeId: string }
+  | { estado: "portal-travado"; id: string }
   | { estado: "parado"; id: string; motivo: string };
+
+/**
+ * O `errorCode` com que o Kuma recusa o `createOrder` enquanto a cidade está
+ * travada no portal: "Scheduling is locked, or programmatic distribution is
+ * locked". Medido em 02/10/2026, das 07:07 às 07:37, com o City Lock de pé.
+ */
+const ERRO_PORTAL_TRAVADO = -6;
 
 async function gravar(estado: EstadoNoticia): Promise<void> {
   await uploadPublico({
@@ -162,6 +170,32 @@ async function abrirPlano(
   const id = estado.id;
 
   /*
+   * A reserva vem antes de tudo, inclusive do catálogo e do inventário.
+   *
+   * Ela era gravada depois deles, e os dois juntos levam mais de um minuto (as
+   * 2.093 páginas de prédio de SP, mais o inventário em lotes). Em 02/10/2026,
+   * na saída de um City Lock, três execuções do cron em minutos seguidos leram
+   * o dia sem plano, cada uma passou pelo inventário sem ver a reserva da outra,
+   * e o dia nasceu com três planos — 101149_60323, _60324 e _60325 — travando as
+   * mesmas telas. Só o último ficou no registro, e a notícia do primeiro ficou
+   * fora dos packs. Com a reserva de pé antes da parte lenta, a execução
+   * seguinte encontra a trava e espera.
+   */
+  const agora = new Date().toISOString();
+  const caixaDoGrupo = { [grupoId]: estado.caixa ?? 1 };
+  const reserva: PlanoNoticias = {
+    data,
+    duracao: estado.duracao,
+    frequencia,
+    grupos: [],
+    caixaDoGrupo: {},
+    criadoEm: agora,
+    criandoEm: agora,
+  };
+  await gravarPlano(reserva);
+  await gravar({ ...estado, criandoEm: agora });
+
+  /*
    * Todas as praças no mesmo pedido.
    *
    * A notícia é conteúdo nacional — o mesmo texto vai a São Paulo e ao Rio —, e
@@ -200,22 +234,15 @@ async function abrirPlano(
   }
 
   if (!itens.length) {
+    // Sem unidade, o dia não tem plano: a reserva sai, para a próxima notícia tentar.
+    await apagar(caminhoPlanoNoticias(data)).catch(() => {});
     return { motivo: `nenhuma tela com inventário para ${data} a ${frequencia} exibições/dia` };
   }
 
-  const agora = new Date().toISOString();
-  const caixaDoGrupo = { [grupoId]: estado.caixa ?? 1 };
-  const reserva: PlanoNoticias = {
-    data,
-    duracao: estado.duracao,
-    frequencia,
-    grupos: [],
-    caixaDoGrupo: {},
-    criadoEm: agora,
-    criandoEm: agora,
-  };
-  await gravarPlano(reserva);
-  await gravar({ ...estado, criandoEm: agora });
+  // Renovada aqui: o catálogo e o inventário comem boa parte do lease.
+  const renovada = new Date().toISOString();
+  await gravarPlano({ ...reserva, criandoEm: renovada });
+  await gravar({ ...estado, criandoEm: renovada });
 
   const unidadeId = await createOrder(
     {
@@ -734,19 +761,35 @@ export async function avancarNoticia(
     };
   }
 
-  const amarracao =
-    plano && plano.unidadeId
-      ? await entrarNoPlano(estado, estado.grupoId, { ...plano, unidadeId: plano.unidadeId }, {
-          cfg,
-          log,
-          frequencia,
-        })
-      : await abrirPlano(estado, estado.grupoId, dataVeiculacao, {
-          cfg,
-          log,
-          cidades,
-          frequencia,
-        });
+  let amarracao: Amarracao;
+  try {
+    amarracao =
+      plano && plano.unidadeId
+        ? await entrarNoPlano(estado, estado.grupoId, { ...plano, unidadeId: plano.unidadeId }, {
+            cfg,
+            log,
+            frequencia,
+          })
+        : await abrirPlano(estado, estado.grupoId, dataVeiculacao, {
+            cfg,
+            log,
+            cidades,
+            frequencia,
+          });
+  } catch (e) {
+    if (!(e instanceof KumaError) || e.code !== ERRO_PORTAL_TRAVADO) throw e;
+    /*
+     * Portal travado não é falha: é o City Lock da publicação de alguém, e a
+     * notícia entra assim que destravar. Mas é o que a operação precisa ver —
+     * em 02/10/2026 a publicação daquela manhã saiu sem as notícias aprovadas
+     * meio minuto antes do lock, e o painel seguia dizendo "Aprovar". O envio
+     * guarda a marca, e a trava do plano continua de pé: é ela que espaça as
+     * tentativas enquanto o portal não libera.
+     */
+    await gravar({ ...estado, criandoEm: undefined, portalTravadoEm: new Date().toISOString() });
+    log(`${id}: portal travado (City Lock) — a notícia entra no plano quando destravar`);
+    return { estado: "portal-travado", id };
+  }
 
   if ("motivo" in amarracao) {
     if (amarracao.retirada) return { estado: "parado", id, motivo: amarracao.motivo };
@@ -761,6 +804,7 @@ export async function avancarNoticia(
     agendadoEm: new Date().toISOString(),
     telas: amarracao.telas,
     criandoEm: undefined,
+    portalTravadoEm: undefined,
   });
   log(`${id}: no ar em ${amarracao.telas} tela(s), plano ${amarracao.unidadeId}`);
 
@@ -886,9 +930,65 @@ export function descreverPasso(p: PassoNoticia): string {
       return `${p.id}: no ar na unidade ${p.unidadeId}, ${p.telas} tela(s)`;
     case "ja-no-ar":
       return `${p.id}: já estava no ar na unidade ${p.unidadeId}`;
+    case "portal-travado":
+      return `${p.id}: aprovada, esperando o portal destravar`;
     case "parado":
       return `${p.id}: parado — ${p.motivo}`;
   }
+}
+
+/**
+ * Cancela um plano a mais do dia e devolve as notícias dele ao plano do registro.
+ *
+ * O dia tem um plano só, e é o que `noticias/plano/` aponta. Um plano a mais é
+ * resto de corrida entre execuções do cron (02/10/2026, ver `abrirPlano`):
+ * trava as mesmas telas a 240 exibições/dia e toca a notícia dele o dia inteiro,
+ * por fora dos packs, assim que alguém publicar no portal. Os envios que caíram
+ * nele passam a apontar o plano do dia, e o cron os recupera na volta seguinte
+ * (`enviosForaDoPlano`), cada um no seu pack.
+ *
+ * Recusa o próprio plano do dia, plano de outra data e plano de teste do
+ * `ignoreLock`, que é de propósito um plano à parte.
+ */
+export async function cancelarPlanoDuplicado(
+  dataISO: string,
+  unidadeId: string,
+  opts: { cfg?: KumaConfig; log?: (m: string) => void } = {},
+): Promise<{ cancelado: string; situacao: string; devolvidos: string[]; plano: string }> {
+  const log = opts.log ?? (() => {});
+  const conta = process.env.KUMA_BIDDER_NEWS?.trim();
+  if (!conta) throw new Error("KUMA_BIDDER_NEWS não configurada — o cancelamento iria para a conta do clima.");
+  const cfg = opts.cfg ?? kumaConfig(conta);
+
+  const plano = await lerJson<PlanoNoticias>(caminhoPlanoNoticias(dataISO));
+  if (!plano?.unidadeId) {
+    throw new Error(`${dataISO} não tem plano com unidade — não há para onde devolver as notícias`);
+  }
+  if (plano.unidadeId === unidadeId) throw new Error(`${unidadeId} é o plano do dia, não um a mais`);
+
+  const { envios } = await enviosDoDia(dataISO);
+  if (envios.some((e) => e.teste && e.unidadeId === unidadeId)) {
+    throw new Error(`${unidadeId} é o plano de um teste do ignoreLock — cancele pelo teste`);
+  }
+
+  const detalhe = await getOrderDetail(unidadeId, cfg);
+  if (detalhe.startDate !== dataISO || detalhe.endDate !== dataISO) {
+    throw new Error(`${unidadeId} veicula de ${detalhe.startDate} a ${detalhe.endDate}, não em ${dataISO}`);
+  }
+  if (detalhe.orderStatus !== "CANCELLED") await cancelOrder(unidadeId, cfg);
+  const situacao = (await getOrderDetail(unidadeId, cfg)).orderStatus;
+
+  const devolvidos: string[] = [];
+  for (const e of envios) {
+    if (e.teste || e.unidadeId !== unidadeId) continue;
+    await gravar({ ...e, unidadeId: plano.unidadeId });
+    devolvidos.push(e.id);
+  }
+  log(
+    `plano ${unidadeId} cancelado (${situacao}); ` +
+      (devolvidos.length ? `${devolvidos.join(", ")} de volta ao plano ${plano.unidadeId}` : "nenhum envio apontava para ele"),
+  );
+  return { cancelado: unidadeId, situacao, devolvidos, plano: plano.unidadeId };
 }
 
 /** Lê um envio pelo id. */

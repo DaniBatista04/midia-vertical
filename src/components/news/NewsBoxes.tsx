@@ -121,6 +121,18 @@ function seloDoEnvio(
       };
     }
     case "em-aprovacao":
+      if (e.portalTravado) {
+        return {
+          rotulo: "Aprovada",
+          detalhe: "portal travado",
+          classe: "apr",
+          dica:
+            "Aprovada, mas a cidade está com City Lock no portal do Kuma e a notícia não consegue " +
+            "entrar no plano. Ela entra sozinha quando destravar — e a publicação feita com o " +
+            "lock de agora sai sem ela.",
+          passo: 2,
+        };
+      }
       return {
         rotulo: "Aprovar",
         detalhe: "no portal do Kuma",
@@ -193,7 +205,8 @@ export function NewsBoxes(p: Props) {
   const parados = (p.dia?.envios ?? []).filter((e) => e.etapa === "parado");
   const atrasadas = enviados.filter((e) => e.etapa === "propagando" && e.atrasada).length;
   const subindo = enviados.filter((e) => e.etapa === "propagando" && !e.atrasada).length;
-  const aprovar = enviados.filter((e) => e.etapa === "em-aprovacao").length;
+  const aprovar = enviados.filter((e) => e.etapa === "em-aprovacao" && !e.portalTravado).length;
+  const travadas = enviados.filter((e) => e.etapa === "em-aprovacao" && e.portalTravado).length;
   const aprovadas = enviados.filter((e) => e.etapa === "no-plano").length;
   const pendentes = [...p.alocacao.entries()];
   // Só hoje há "agora": num dia agendado nada está no ar nem encerrado ainda.
@@ -362,6 +375,14 @@ export function NewsBoxes(p: Props) {
           {aprovar > 0 && (
             <span className="etapa-chip apr" title="Esperando aprovação na Análise Criativa do portal do Kuma">
               <i /> {aprovar} para aprovar no Kuma
+            </span>
+          )}
+          {travadas > 0 && (
+            <span
+              className="etapa-chip apr"
+              title="Aprovadas, mas o portal está com City Lock: entram no plano quando destravar, e a publicação de agora sai sem elas"
+            >
+              <i /> {travadas} esperando destravar o portal
             </span>
           )}
           <span className="etapa-chip ok" title="Aprovadas e no plano do dia">

@@ -55,6 +55,11 @@ export type EnvioDoDia = {
   atrasada?: boolean;
   /** Quando a notícia entrou na etapa em que está. */
   desde?: string;
+  /**
+   * Aprovada, mas a última tentativa de entrar no plano esbarrou no City Lock do
+   * portal. A publicação em curso sai sem ela.
+   */
+  portalTravado?: string;
 };
 
 export type DiaNoticias = {
@@ -168,6 +173,9 @@ export async function GET(req: NextRequest) {
           ? { submeteEm: new Date(Date.parse(e.hospedadoEm) + GRACA_SEGUNDOS * 1_000).toISOString() }
           : {}),
         ...(envioAtrasado(e) ? { atrasada: true } : {}),
+        ...(e.portalTravadoEm && !e.unidadeId && !e.erro && !e.retiradaEm
+          ? { portalTravado: e.portalTravadoEm }
+          : {}),
         desde: e.retiradaEm ?? e.agendadoEm ?? e.submetidoEm ?? e.hospedadoEm,
       })),
     };
