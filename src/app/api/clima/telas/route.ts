@@ -50,6 +50,8 @@ export const maxDuration = 300;
  *   /api/clima/telas?unidade=101147_57932     unidade explícita, sem registro
  *   /api/clima/telas?cru=1                    o plano, as unidades e o grupo como
  *                                             o Kuma devolve, sem o catálogo
+ *   /api/clima/telas?conta=noticia&unidade=…  a unidade da notícia, lida na conta
+ *                                             dela (com &grupo= para a auditoria)
  *
  * O filtro de prédio ignora acento e caixa, porque o nome chega escrito de
  * formas diferentes ("PACO DE HYGIENOPOLIS" no WhatsApp, "Paço de Hygienópolis"
@@ -113,11 +115,21 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const cfg = kumaConfig();
+    /*
+     * A unidade da notícia mora em outra conta, e lida com a do clima o Kuma
+     * responde que o plano não existe. A pergunta "a tela recebeu?" é a mesma
+     * para as duas, então a rota serve às duas.
+     */
+    const daNoticia = params.get("conta") === "noticia";
+    const contaNoticia = process.env.KUMA_BIDDER_NEWS?.trim();
+    if (daNoticia && !contaNoticia) {
+      return Response.json({ error: "KUMA_BIDDER_NEWS não configurada." }, { status: 500 });
+    }
+    const cfg = kumaConfig(daNoticia ? contaNoticia : undefined);
 
     // A unidade pode vir na URL — serve para conferir um dia cujo registro já
     // foi limpo, ou uma unidade criada à mão no portal.
-    const registro = await lerJson<EstadoDoDia>(caminhoEstado(data, cidade));
+    const registro = daNoticia ? null : await lerJson<EstadoDoDia>(caminhoEstado(data, cidade));
     const unidadeId = params.get("unidade") ?? registro?.unidadeId;
     if (!unidadeId) {
       return Response.json(
@@ -137,9 +149,10 @@ export async function GET(req: NextRequest) {
 
     // A auditoria é acessório: se ela falhar, o resto da resposta — que é a
     // pergunta principal, quais telas foram alcançadas — continua valendo.
-    const auditoria = registro?.grupoId
-      ? await getCreativeGroup(registro.grupoId, cfg).catch((e) => {
-          console.error(`[clima/telas] auditoria de ${registro.grupoId} não veio: ${e}`);
+    const grupoId = params.get("grupo") ?? registro?.grupoId;
+    const auditoria = grupoId
+      ? await getCreativeGroup(grupoId, cfg).catch((e) => {
+          console.error(`[clima/telas] auditoria de ${grupoId} não veio: ${e}`);
           return null;
         })
       : null;
